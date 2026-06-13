@@ -184,14 +184,15 @@ def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
     ``io`` provides ``read_current``, ``resolve_member``, ``create_group``,
-    ``set_description``, ``set_group_type``, ``add_member``, ``remove_member``
-    and ``delete_group``. Injecting it keeps this function testable without the
-    samba bindings.
+    ``set_description``, ``set_group_type``, ``add_member``, ``remove_member``,
+    ``delete_group`` and the move helpers ``needs_move``, ``parent_exists`` and
+    ``move``. Injecting it keeps this function testable without the bindings.
     """
     name = params["name"]
     state = params["state"]
     members = params.get("members")
     purge = params["members_purge"]
+    path = params.get("path")
     desired = build_desired(params)
 
     current = io.read_current(name)
@@ -204,10 +205,18 @@ def run(params, check_mode, io):
         member_diff = diff_members(current_members, desired_dns, purge)
 
     member_planned = bool(member_diff["adds"] or member_diff["removes"])
+    # A move is needed when an existing group's parent differs from the desired
+    # location (path, or the default container when omitted). io compares DNs
+    # with normalized ldb.Dn equality, never strings.
+    move_needed = (
+        state == "present"
+        and current is not None
+        and io.needs_move(current["_dn"], path)
+    )
     action = planned["action"]
-    if action == "none" and member_planned:
+    if action == "none" and (member_planned or move_needed):
         action = "modify"
-    changed = planned["changed"] or member_planned
+    changed = planned["changed"] or member_planned or move_needed
 
     result = {
         "changed": changed,
@@ -240,12 +249,26 @@ def run(params, check_mode, io):
         result["group"] = {"name": name, "state": "absent"}
         return result
 
+    # Fail before any write if the target parent is missing (no partial create
+    # or move). The narrow race where it vanishes afterwards is caught by move().
+    if (planned["action"] == "create" or move_needed) and path is not None \
+            and not io.parent_exists(path):
+        raise SambaGroupError("path '%s' does not exist; create it first" % path)
+
     if planned["action"] == "create":
         io.create_group(name, desired["group_type"], desired.get("description"))
         current = io.read_current(name)
 
     if current is None:
         raise SambaGroupError("group '%s' could not be read back after creation" % name)
+
+    # Order: move first (so later writes target the final DN), then attributes
+    # and membership.
+    moved = False
+    if io.needs_move(current["_dn"], path):
+        io.move(current["_dn"], path)
+        current = io.read_current(name)
+        moved = True
 
     if planned["action"] == "modify":
         if "description" in planned["attr_changes"]:
@@ -261,9 +284,9 @@ def run(params, check_mode, io):
         if io.remove_member(current["_dn"], dn):
             member_changed = True
 
-    # Honest changed: scalar changes are real; member ops may have been no-ops
-    # due to a concurrent change (handled as idempotent no-ops in the I/O).
-    result["changed"] = planned["changed"] or member_changed
+    # Honest changed: scalar/move changes are real; member ops may have been
+    # no-ops due to a concurrent change (handled as idempotent no-ops in the I/O).
+    result["changed"] = planned["changed"] or member_changed or moved
     if not result["changed"]:
         result["action"] = _ACTION_LABEL["none"]
         result["diff"] = {"before": {}, "after": {}}

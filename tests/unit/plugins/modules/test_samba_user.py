@@ -55,6 +55,20 @@ class FakeIO:
     def set_password(self, username, password):
         self.calls.append(("set_password", username, password))
 
+    # Move helpers. needs_move/parent_exists are read-only checks and are not
+    # recorded in calls (so existing call-sequence assertions stay valid).
+    # Default: object already at the desired location (no move). Tests that
+    # exercise moves override needs_move.
+    def needs_move(self, current_dn, path):
+        return False
+
+    def parent_exists(self, path):
+        return True
+
+    def move(self, current_dn, path):
+        self.calls.append(("move", current_dn, path))
+        return "CN=jdoe,%s" % path
+
 
 def make_params(**over):
     params = {
@@ -67,6 +81,7 @@ def make_params(**over):
         "enabled": True,
         "password": None,
         "update_password": "on_create",
+        "path": None,
         "state": "present",
     }
     params.update(over)
@@ -257,3 +272,63 @@ def test_always_without_password_does_not_write():
     )
     assert result["changed"] is False
     assert "set_password" not in call_names(fake)
+
+
+class _MovingIO(FakeIO):
+    """FakeIO that reports the object is in the wrong place (a move is needed)."""
+
+    def needs_move(self, current_dn, path):
+        return True
+
+
+def test_no_move_when_location_matches():
+    # needs_move False (default) -> existing user, path set, nothing else -> no
+    # move and no change (the idempotence guarantee).
+    fake = FakeIO(current=existing_user())
+    result = logic.run(make_params(path="CN=Users,DC=example,DC=com"), False, fake)
+    assert result["changed"] is False
+    assert "move" not in call_names(fake)
+
+
+def test_move_when_location_differs():
+    fake = _MovingIO(current=existing_user())
+    result = logic.run(make_params(path="OU=Eng,DC=example,DC=com"), False, fake)
+    assert result["changed"] is True
+    assert result["action"] == "modified"
+    assert ("move", "CN=jdoe,CN=Users,DC=example,DC=com", "OU=Eng,DC=example,DC=com") in fake.calls
+
+
+def test_create_with_path_moves_after_create():
+    fake = _MovingIO(current=None)
+    result = logic.run(make_params(password="S3cret!", path="OU=Eng,DC=example,DC=com"), False, fake)
+    assert result["changed"] is True
+    names = call_names(fake)
+    assert "create_user" in names
+    assert "move" in names
+    assert names.index("create_user") < names.index("move")
+
+
+def test_move_check_mode_plans_without_writing():
+    fake = _MovingIO(current=existing_user())
+    result = logic.run(make_params(path="OU=Eng,DC=example,DC=com"), True, fake)
+    assert result["changed"] is True
+    assert "move" not in call_names(fake)
+
+
+def test_move_target_path_missing_fails():
+    class _MissingParentIO(_MovingIO):
+        def parent_exists(self, path):
+            return False
+
+    fake = _MissingParentIO(current=existing_user())
+    with pytest.raises(logic.SambaUserError):
+        logic.run(make_params(path="OU=Missing,DC=example,DC=com"), False, fake)
+    assert "move" not in call_names(fake)
+
+
+def test_move_then_attribute_change_in_order():
+    fake = _MovingIO(current=existing_user(display_name="Old"))
+    result = logic.run(make_params(display_name="New", path="OU=Eng,DC=example,DC=com"), False, fake)
+    assert result["changed"] is True
+    names = call_names(fake)
+    assert names.index("move") < names.index("apply_attrs")

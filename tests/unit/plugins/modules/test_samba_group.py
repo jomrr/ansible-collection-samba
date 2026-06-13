@@ -8,6 +8,8 @@ must also not require samba."""
 
 from __future__ import annotations
 
+import pytest
+
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_group
 
@@ -63,6 +65,18 @@ class FakeIO:
         self.current = None
         return True
 
+    # Move helpers. needs_move/parent_exists are read-only checks, not recorded
+    # in calls. Default: already at the desired location (no move).
+    def needs_move(self, current_dn, path):
+        return False
+
+    def parent_exists(self, path):
+        return True
+
+    def move(self, current_dn, path):
+        self.calls.append(("move", current_dn, path))
+        return "CN=engineers,%s" % path
+
 
 def make_params(**over):
     params = {
@@ -72,6 +86,7 @@ def make_params(**over):
         "description": None,
         "members": None,
         "members_purge": False,
+        "path": None,
         "state": "present",
     }
     params.update(over)
@@ -215,3 +230,59 @@ def test_member_add_race_all_noop_reports_unchanged():
     assert "add_member" in call_names(fake)
     assert result["changed"] is False
     assert result["action"] == "unchanged"
+
+
+class _MovingIO(FakeIO):
+    """FakeIO that reports the group is in the wrong place (a move is needed)."""
+
+    def needs_move(self, current_dn, path):
+        return True
+
+
+def test_no_move_when_location_matches():
+    fake = FakeIO(current=existing_group())
+    result = logic.run(make_params(path="CN=Users,DC=example,DC=com"), False, fake)
+    assert result["changed"] is False
+    assert "move" not in call_names(fake)
+
+
+def test_move_when_location_differs():
+    fake = _MovingIO(current=existing_group())
+    result = logic.run(make_params(path="OU=Groups,DC=example,DC=com"), False, fake)
+    assert result["changed"] is True
+    assert result["action"] == "modified"
+    assert ("move", "CN=engineers,CN=Users,DC=example,DC=com", "OU=Groups,DC=example,DC=com") in fake.calls
+
+
+def test_create_with_path_moves_after_create():
+    fake = _MovingIO(current=None)
+    result = logic.run(make_params(path="OU=Groups,DC=example,DC=com"), False, fake)
+    assert result["changed"] is True
+    names = call_names(fake)
+    assert names.index("create_group") < names.index("move")
+
+
+def test_move_check_mode_plans_without_writing():
+    fake = _MovingIO(current=existing_group())
+    result = logic.run(make_params(path="OU=Groups,DC=example,DC=com"), True, fake)
+    assert result["changed"] is True
+    assert "move" not in call_names(fake)
+
+
+def test_move_target_path_missing_fails():
+    class _MissingParentIO(_MovingIO):
+        def parent_exists(self, path):
+            return False
+
+    fake = _MissingParentIO(current=existing_group())
+    with pytest.raises(logic.SambaGroupError):
+        logic.run(make_params(path="OU=Missing,DC=example,DC=com"), False, fake)
+    assert "move" not in call_names(fake)
+
+
+def test_move_before_member_changes():
+    fake = _MovingIO(current=existing_group())
+    result = logic.run(make_params(members=["jdoe"], path="OU=Groups,DC=example,DC=com"), False, fake)
+    assert result["changed"] is True
+    names = call_names(fake)
+    assert names.index("move") < names.index("add_member")

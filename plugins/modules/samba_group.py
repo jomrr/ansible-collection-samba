@@ -68,6 +68,17 @@ options:
         removed.
     type: bool
     default: false
+  path:
+    description:
+      - The distinguished name of the container or OU the group should live in,
+        for example C(OU=Groups,DC=example,DC=com). The parent must already
+        exist.
+      - When omitted, the group is placed in (and, if it exists elsewhere,
+        moved to) the domain's default Users container (C(CN=Users,<domain>)).
+      - On an existing group a differing location triggers an idempotent move
+        (rename); the comparison is a normalized DN comparison, so only a real
+        change moves the object.
+    type: str
   state:
     description:
       - Whether the group should exist (C(present)) or not (C(absent)).
@@ -299,6 +310,37 @@ class SambaGroupIO:
                 raise logic.SambaGroupError("group '%s' vanished before it could be modified" % dn)
             raise
 
+    def _desired_parent(self, path):
+        """Return the desired parent DN (path, or the default Users container)."""
+        if path is None:
+            return samba_user_io.default_users_dn(self.samdb)
+        try:
+            return samba_user_io.parse_dn(self.samdb, path)
+        except ValueError:
+            raise logic.SambaGroupError("path '%s' is not a valid distinguished name" % path)
+
+    def parent_exists(self, path):
+        """Return True if the desired parent container exists."""
+        return samba_user_io.dn_exists(self.samdb, self._desired_parent(path))
+
+    def needs_move(self, current_dn, path):
+        """Return True if the object's parent differs from the desired location."""
+        return not samba_user_io.same_parent(self.samdb, current_dn, self._desired_parent(path))
+
+    def move(self, current_dn, path):
+        """Move (rename) the group under the desired parent, preserving its RDN."""
+        ldb = samba_user_io.load_ldb()
+        target = samba_user_io.reparent_dn(self.samdb, current_dn, self._desired_parent(path))
+        try:
+            self.samdb.rename(samba_user_io.parse_dn(self.samdb, current_dn), target)
+        except ldb.LdbError as err:
+            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
+                raise logic.SambaGroupError("group vanished before it could be moved")
+            if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
+                raise logic.SambaGroupError("an object already exists at the target location")
+            raise
+        return str(target)
+
 
 def main():
     """Module entry point."""
@@ -309,6 +351,7 @@ def main():
         description=dict(type="str"),
         members=dict(type="list", elements="str"),
         members_purge=dict(type="bool", default=False),
+        path=dict(type="str"),
         state=dict(type="str", default="present", choices=["present", "absent"]),
     )
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)

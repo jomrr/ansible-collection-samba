@@ -93,3 +93,28 @@
         name: ghostou
         path: "{{ samba_base_dn }}"
         state: absent
+
+    - name: converge | Create a user directly in an OU
+      jomrr.samba.samba_user:
+        username: placed
+        password: "{{ _password }}"
+        path: "OU=loc_a,{{ samba_base_dn }}"
+        state: present
+
+    - name: converge | Move a user to another OU (idempotent move)
+      jomrr.samba.samba_user:
+        username: mover
+        path: "OU=loc_b,{{ samba_base_dn }}"
+        state: present
+
+    - name: converge | Create a group directly in an OU
+      jomrr.samba.samba_group:
+        name: gplaced
+        path: "OU=loc_a,{{ samba_base_dn }}"
+        state: present
+
+    - name: converge | Move a group to another OU (idempotent move)
+      jomrr.samba.samba_group:
+        name: gmover
+        path: "OU=loc_b,{{ samba_base_dn }}"
+        state: present

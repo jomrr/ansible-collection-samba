@@ -142,15 +142,11 @@ class SambaOuIO:
 
     def _ou_dn(self, name, path):
         """Build the OU distinguished name safely from ``name`` and ``path``."""
-        ldb = samba_user_io.load_ldb()
         try:
-            parent = ldb.Dn(self.samdb, path)
+            parent = samba_user_io.parse_dn(self.samdb, path)
         except ValueError:
             raise logic.SambaOuError("path '%s' is not a valid distinguished name" % path)
-        dn = ldb.Dn(self.samdb, "OU=placeholder")
-        dn.set_component(0, "OU", name)
-        dn.add_base(parent)
-        return dn
+        return samba_user_io.build_child_dn(self.samdb, "OU", name, parent)
 
     def read_current(self, name, path):
         """Return the normalized current state of the OU or ``None``."""

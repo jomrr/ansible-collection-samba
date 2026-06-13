@@ -137,13 +137,15 @@ def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
     ``io`` provides ``read_current``, ``create_user``, ``apply_attrs``,
-    ``set_enabled``, ``set_password`` and ``delete_user``. Injecting it keeps
-    this function testable without the samba bindings.
+    ``set_enabled``, ``set_password``, ``delete_user`` and the move helpers
+    ``needs_move``, ``parent_exists`` and ``move``. Injecting it keeps this
+    function testable without the samba bindings.
     """
     username = params["username"]
     state = params["state"]
     password = params.get("password")
     update_password = params["update_password"]
+    path = params.get("path")
     desired = build_desired(params)
 
     current = io.read_current(username)
@@ -163,10 +165,19 @@ def run(params, check_mode, io):
         and update_password == "always"
     )
 
+    # A move is needed when an existing object's parent differs from the desired
+    # location (path, or the default container when path is omitted). The DN
+    # comparison is done by io via normalized ldb.Dn equality, never strings.
+    move_needed = (
+        state == "present"
+        and current is not None
+        and io.needs_move(current["_dn"], path)
+    )
+
     action = planned["action"]
-    if set_pw_on_existing and action == "none":
+    if action == "none" and (set_pw_on_existing or move_needed):
         action = "modify"
-    changed = planned["changed"] or set_pw_on_existing
+    changed = planned["changed"] or set_pw_on_existing or move_needed
 
     result = {
         "changed": changed,
@@ -200,12 +211,24 @@ def run(params, check_mode, io):
         result["user"] = {"username": username, "state": "absent"}
         return result
 
+    # Fail before any write if the target parent is missing (no partial create
+    # or move). The narrow race where it vanishes afterwards is caught by move().
+    if (planned["action"] == "create" or move_needed) and path is not None \
+            and not io.parent_exists(path):
+        raise SambaUserError("path '%s' does not exist; create it first" % path)
+
     if planned["action"] == "create":
         io.create_user(username, password)
         current = io.read_current(username)
 
     if current is None:
         raise SambaUserError("user '%s' could not be read back after creation" % username)
+
+    # Order: move first (so the later attribute writes target the final DN),
+    # then attributes, enable state and password.
+    if io.needs_move(current["_dn"], path):
+        io.move(current["_dn"], path)
+        current = io.read_current(username)
 
     if planned["attr_changes"]:
         io.apply_attrs(current["_dn"], planned["attr_changes"])

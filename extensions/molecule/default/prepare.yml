@@ -181,3 +181,25 @@
             name: todelete_ou
             path: "{{ samba_base_dn }}"
             state: present
+
+        - name: prepare | seed | OUs for the move tests
+          jomrr.samba.samba_ou:
+            name: "{{ item }}"
+            path: "{{ samba_base_dn }}"
+            state: present
+          loop:
+            - loc_a
+            - loc_b
+
+        - name: prepare | seed | user converge will move to another OU
+          jomrr.samba.samba_user:
+            username: mover
+            password: "{{ _seed_password }}"
+            path: "OU=loc_a,{{ samba_base_dn }}"
+            state: present
+
+        - name: prepare | seed | group converge will move to another OU
+          jomrr.samba.samba_group:
+            name: gmover
+            path: "OU=loc_a,{{ samba_base_dn }}"
+            state: present
