@@ -1,9 +1,17 @@
 ---
-# Exercise all four modules against the real DC. This playbook must be fully
+# Exercise all modules against the real DC. This playbook must be fully
 # idempotent: molecule runs it twice and the second run must report no changes.
-# Objects that are modified/disabled/deleted/purged here were seeded in
+# Objects that are modified/disabled/deleted/purged/moved here were seeded in
 # prepare.yml, so those transitions happen on the first run and are no-ops on
 # the second.
+#
+# Deliberately NOT tested here: samba_user update_password=always. It is the one
+# honestly non-idempotent path (the password cannot be read back, so the write
+# is reported as a change every run). Molecule's idempotence stage re-runs this
+# whole playbook and asserts zero changes with no per-task exclusion, so a task
+# using update_password=always would (correctly) fail that stage. Its behaviour
+# is covered by the unit tests instead; putting it here would mean weakening the
+# idempotence invariant, which we do not do.
 - name: Converge
   hosts: all
   gather_facts: false
@@ -28,10 +36,26 @@
         display_name: New Name
         state: present
 
+    - name: converge | Change several attributes on an existing user at once
+      jomrr.samba.samba_user:
+        username: multiattr
+        given_name: Multi
+        surname: User
+        display_name: New Multi
+        email: multi.user@example.com
+        description: New multi description
+        state: present
+
     - name: converge | Disable an existing user
       jomrr.samba.samba_user:
         username: todisable
         enabled: false
+        state: present
+
+    - name: converge | Re-enable a disabled user
+      jomrr.samba.samba_user:
+        username: toenable
+        enabled: true
         state: present
 
     - name: converge | Remove a user
@@ -54,12 +78,26 @@
           - jane
         state: present
 
-    - name: converge | Reduce a group to an authoritative member set (purge)
+    - name: converge | Reduce a 3-member group to one authoritative member (purge)
       jomrr.samba.samba_group:
         name: crew
         members:
           - tomodify
         members_purge: true
+        state: present
+
+    - name: converge | Add a member to a group that already has one (additive)
+      jomrr.samba.samba_group:
+        name: addmembers
+        members:
+          - jane
+        state: present
+
+    - name: converge | Change a group's scope (global -> universal)
+      jomrr.samba.samba_group:
+        name: scopechange
+        scope: universal
+        category: security
         state: present
 
     - name: converge | Create a top-level OU
@@ -75,11 +113,24 @@
         path: "OU=department,{{ samba_base_dn }}"
         state: present
 
+    - name: converge | Create a third-level nested OU (parents just created)
+      jomrr.samba.samba_ou:
+        name: squad
+        path: "OU=team,OU=department,{{ samba_base_dn }}"
+        state: present
+
     - name: converge | Change an existing OU's description
       jomrr.samba.samba_ou:
         name: oldou
         path: "{{ samba_base_dn }}"
         description: New OU description
+        state: present
+
+    - name: converge | Change a nested OU's description
+      jomrr.samba.samba_ou:
+        name: submod
+        path: "OU=loc_a,{{ samba_base_dn }}"
+        description: New nested description
         state: present
 
     - name: converge | Remove an (empty) OU
@@ -107,6 +158,15 @@
         path: "OU=loc_b,{{ samba_base_dn }}"
         state: present
 
+    - name: converge | Move a user to another OU AND change an attribute at once
+      # Exercises the documented create -> move -> attributes order: the
+      # displayName write must land on the post-move DN.
+      jomrr.samba.samba_user:
+        username: moverattr
+        display_name: New MoverAttr
+        path: "OU=loc_b,{{ samba_base_dn }}"
+        state: present
+
     - name: converge | Create a group directly in an OU
       jomrr.samba.samba_group:
         name: gplaced
@@ -117,4 +177,12 @@
       jomrr.samba.samba_group:
         name: gmover
         path: "OU=loc_b,{{ samba_base_dn }}"
+        state: present
+
+    - name: converge | Create a group with a member directly in an OU (path + members)
+      jomrr.samba.samba_group:
+        name: gstaff
+        path: "OU=loc_a,{{ samba_base_dn }}"
+        members:
+          - jane
         state: present

@@ -142,10 +142,25 @@
             password: "{{ _seed_password }}"
             state: present
 
+        - name: prepare | seed | user whose several attributes converge will change
+          jomrr.samba.samba_user:
+            username: multiattr
+            display_name: Old Multi
+            description: Old multi description
+            password: "{{ _seed_password }}"
+            state: present
+
         - name: prepare | seed | user converge will disable
           jomrr.samba.samba_user:
             username: todisable
             enabled: true
+            password: "{{ _seed_password }}"
+            state: present
+
+        - name: prepare | seed | disabled user converge will re-enable
+          jomrr.samba.samba_user:
+            username: toenable
+            enabled: false
             password: "{{ _seed_password }}"
             state: present
 
@@ -161,12 +176,27 @@
             password: "{{ _seed_password }}"
             state: present
 
-        - name: prepare | seed | group converge will reduce to one member
+        - name: prepare | seed | group converge will reduce from three members to one
           jomrr.samba.samba_group:
             name: crew
             scope: global
             category: security
+            members: [extrauser, tomodify, toenable]
+            state: present
+
+        - name: prepare | seed | group with a member converge will add to (additive)
+          jomrr.samba.samba_group:
+            name: addmembers
+            scope: global
+            category: security
             members: [extrauser]
+            state: present
+
+        - name: prepare | seed | global group whose scope converge will change to universal
+          jomrr.samba.samba_group:
+            name: scopechange
+            scope: global
+            category: security
             state: present
 
         - name: prepare | seed | OU whose description converge will change
@@ -191,9 +221,24 @@
             - loc_a
             - loc_b
 
+        - name: prepare | seed | nested OU whose description converge will change
+          jomrr.samba.samba_ou:
+            name: submod
+            path: "OU=loc_a,{{ samba_base_dn }}"
+            description: Old nested description
+            state: present
+
         - name: prepare | seed | user converge will move to another OU
           jomrr.samba.samba_user:
             username: mover
+            password: "{{ _seed_password }}"
+            path: "OU=loc_a,{{ samba_base_dn }}"
+            state: present
+
+        - name: prepare | seed | user converge will move AND change an attribute on
+          jomrr.samba.samba_user:
+            username: moverattr
+            display_name: Old MoverAttr
             password: "{{ _seed_password }}"
             path: "OU=loc_a,{{ samba_base_dn }}"
             state: present

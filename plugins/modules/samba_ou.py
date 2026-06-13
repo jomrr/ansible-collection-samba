@@ -125,6 +125,7 @@ from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
 
 
@@ -153,14 +154,14 @@ class SambaOuIO:
         ldb = samba_user_io.load_ldb()
         dn = self._ou_dn(name, path)
         try:
-            res = self.samdb.search(base=dn, scope=ldb.SCOPE_BASE, attrs=["description"])
+            res = self.samdb.search(base=dn, scope=ldb.SCOPE_BASE, attrs=samba_ou_io.OU_ATTRS)
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
                 return None
             raise
         if len(res) == 0:
             return None
-        return {"description": samba_user_io.first_value(res[0], "description"), "_dn": str(res[0].dn)}
+        return samba_ou_io.message_to_state(res[0])
 
     def create_ou(self, name, path, description):
         """Create the OU. A concurrent create or a missing parent fail cleanly."""

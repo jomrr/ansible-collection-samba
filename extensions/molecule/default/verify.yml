@@ -30,6 +30,20 @@
         that:
           - _tomodify.users[0].display_name == "New Name"
 
+    - name: verify | Read the multi-attribute user
+      jomrr.samba.samba_user_info:
+        username: multiattr
+      register: _multiattr
+
+    - name: verify | All of the changed attributes are present
+      ansible.builtin.assert:
+        that:
+          - _multiattr.users[0].given_name == "Multi"
+          - _multiattr.users[0].surname == "User"
+          - _multiattr.users[0].display_name == "New Multi"
+          - _multiattr.users[0].email == "multi.user@example.com"
+          - _multiattr.users[0].description == "New multi description"
+
     - name: verify | Read the disabled user
       jomrr.samba.samba_user_info:
         username: todisable
@@ -39,6 +53,16 @@
       ansible.builtin.assert:
         that:
           - _todisable.users[0].enabled is false
+
+    - name: verify | Read the re-enabled user
+      jomrr.samba.samba_user_info:
+        username: toenable
+      register: _toenable
+
+    - name: verify | The user is enabled again
+      ansible.builtin.assert:
+        that:
+          - _toenable.users[0].enabled is true
 
     - name: verify | Read the deleted user
       jomrr.samba.samba_user_info:
@@ -69,26 +93,98 @@
         name: crew
       register: _crew
 
-    - name: verify | Authoritative membership kept only the listed member
+    - name: verify | Authoritative purge removed the other two members
       ansible.builtin.assert:
         that:
           - _crew.groups[0].members | length == 1
           - "'tomodify' in (_crew.groups[0].members | join(' ') | lower)"
           - "'extrauser' not in (_crew.groups[0].members | join(' ') | lower)"
+          - "'toenable' not in (_crew.groups[0].members | join(' ') | lower)"
 
-    # No samba_ou_info module yet, so OUs are verified read-only via samba-tool.
-    - name: verify | List the organizational units
-      ansible.builtin.command:
-        cmd: samba-tool ou list
-      register: _ou_list
-      changed_when: false
+    - name: verify | Read the additive-membership group
+      jomrr.samba.samba_group_info:
+        name: addmembers
+      register: _addmembers
 
-    - name: verify | The OUs (incl. nested) exist and the deleted one is gone
+    - name: verify | The pre-existing and the added member are both present
       ansible.builtin.assert:
         that:
-          - _ou_list.stdout is search('OU=department')
-          - _ou_list.stdout is search('OU=team,OU=department')
-          - not (_ou_list.stdout is search('todelete_ou'))
+          - _addmembers.groups[0].members | length == 2
+          - "'extrauser' in (_addmembers.groups[0].members | join(' ') | lower)"
+          - "'jane' in (_addmembers.groups[0].members | join(' ') | lower)"
+
+    - name: verify | Read the scope-changed group
+      jomrr.samba.samba_group_info:
+        name: scopechange
+      register: _scopechange
+
+    - name: verify | The group scope is now universal
+      ansible.builtin.assert:
+        that:
+          - _scopechange.groups[0].scope == "universal"
+          - _scopechange.groups[0].category == "security"
+
+    - name: verify | Read the group created with a member in an OU
+      jomrr.samba.samba_group_info:
+        name: gstaff
+      register: _gstaff
+
+    - name: verify | The group sits in the OU and has its member
+      ansible.builtin.assert:
+        that:
+          - _gstaff.groups[0].dn | lower is search('ou=loc_a')
+          - "'jane' in (_gstaff.groups[0].members | join(' ') | lower)"
+
+    - name: verify | Read the top-level OU
+      jomrr.samba.samba_ou_info:
+        name: department
+        path: "{{ samba_base_dn }}"
+      register: _department
+
+    - name: verify | Read the second-level OU
+      jomrr.samba.samba_ou_info:
+        name: team
+        path: "OU=department,{{ samba_base_dn }}"
+      register: _team
+
+    - name: verify | Read the third-level OU
+      jomrr.samba.samba_ou_info:
+        name: squad
+        path: "OU=team,OU=department,{{ samba_base_dn }}"
+      register: _squad
+
+    - name: verify | Read the deleted OU
+      jomrr.samba.samba_ou_info:
+        name: todelete_ou
+        path: "{{ samba_base_dn }}"
+      register: _todelete_ou
+
+    - name: verify | Read the nested OU whose description changed
+      jomrr.samba.samba_ou_info:
+        name: submod
+        path: "OU=loc_a,{{ samba_base_dn }}"
+      register: _submod
+
+    - name: verify | The 3-level hierarchy exists, the deleted OU is gone, the nested description changed
+      ansible.builtin.assert:
+        that:
+          - _department.ous | length == 1
+          - _team.ous | length == 1
+          - _team.ous[0].dn | lower is search('ou=team,ou=department')
+          - _squad.ous | length == 1
+          - _squad.ous[0].dn | lower is search('ou=squad,ou=team,ou=department')
+          - _todelete_ou.ous | length == 0
+          - _submod.ous[0].description == "New nested description"
+
+    - name: verify | List all OUs in the domain (no name)
+      jomrr.samba.samba_ou_info:
+      register: _all_ous
+
+    - name: verify | The created OUs appear in the full listing
+      ansible.builtin.assert:
+        that:
+          - "'department' in (_all_ous.ous | map(attribute='name') | list)"
+          - "'squad' in (_all_ous.ous | map(attribute='name') | list)"
 
     - name: verify | Read the user placed in / moved between OUs
       jomrr.samba.samba_user_info:
