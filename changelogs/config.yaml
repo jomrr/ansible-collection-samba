@@ -1,0 +1,8 @@
+---
+changelog_filename_template: ../CHANGELOG.rst
+changes_file: changelog.yaml
+changes_format: combined
+keep_fragments: false
+notesdir: fragments
+title: jomrr.samba
+trivial_section_name: trivial

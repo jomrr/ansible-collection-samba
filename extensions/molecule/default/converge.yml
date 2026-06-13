@@ -1,0 +1,9 @@
+---
+# Converge: exercise the modules against the local DC. STUB for Iter 1.
+- name: Converge
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: converge | Placeholder for module calls
+      ansible.builtin.debug:
+        msg: "TODO Iter 1: call samba_user / samba_group / samba_ou / samba_dns_record"

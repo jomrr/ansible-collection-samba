@@ -1,0 +1,10 @@
+---
+# Verify: idempotence is asserted by molecule's second converge run.
+# Add explicit state assertions here as modules land.
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: verify | Placeholder for state assertions
+      ansible.builtin.debug:
+        msg: "TODO Iter 1: assert created objects exist and match desired state"

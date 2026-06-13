@@ -1,0 +1,29 @@
+---
+# Integration scenario. Targets the PRE-BUILT systemd-enabled images.
+# Claude Code does NOT build or modify these images — only references them.
+# Replace the image refs / distro matrix with your actual registry tags.
+
+driver:
+  name: podman
+
+platforms:
+  - name: samba-dc-fedora
+    image: CHANGEME/molecule-systemd-fedora:43
+    command: /usr/sbin/init
+    systemd: always
+    # rootless cgroups v2: prefer host cgroupns + tmpfs over full privileged
+    # where the image allows it; adjust per ADR 0001 findings.
+    cgroupns_mode: host
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+
+provisioner:
+  name: ansible
+  playbooks:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+
+verifier:
+  name: ansible

@@ -1,0 +1,24 @@
+namespace: jomrr
+name: samba
+version: 0.1.0
+readme: README.md
+authors:
+  - Jonas
+description: >-
+  Manage Samba AD DC objects (users, groups, OUs) and Samba internal DNS
+  records via native Python bindings.
+license_file: LICENSE
+tags:
+  - samba
+  - activedirectory
+  - dns
+  - ldap
+  - identity
+  - infrastructure
+  - security
+repository: https://github.com/jomrr/ansible-collection-samba
+issues: https://github.com/jomrr/ansible-collection-samba/issues
+build_ignore:
+  - extensions/molecule
+  - .ansible-lint
+  - architecture

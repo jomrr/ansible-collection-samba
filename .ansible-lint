@@ -1,0 +1,10 @@
+---
+# Production profile = strictest built-in profile.
+# Deliberately NO skip_list, NO warn_list downgrades, NO disabled rules.
+# If a rule fires, fix the code — do not relax this file.
+profile: production
+
+exclude_paths:
+  - extensions/molecule/
+  - changelogs/
+  - .github/

@@ -1,0 +1,13 @@
+---
+# Provision the Samba AD DC inside the container (ADR 0003).
+# This is a STUB — fill in the real provisioning. Do not work around a failing
+# provision by skipping tests; fix the provision or escalate.
+- name: Prepare Samba AD DC
+  hosts: all
+  gather_facts: true
+  tasks:
+    - name: prepare | Placeholder for domain provision
+      ansible.builtin.debug:
+        msg: >-
+          TODO Iter 1: samba-tool domain provision with correct FQDN, realm,
+          krb5.conf and DNS backend. See ADR 0003.
