@@ -178,26 +178,8 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
-
-#: LDAP attributes read to build the current state.
-USER_ATTRS = [
-    "sAMAccountName",
-    "givenName",
-    "sn",
-    "displayName",
-    "mail",
-    "description",
-    "userAccountControl",
-]
-
-
-def _first_value(message, attr):
-    """Return the first value of an LDB message attribute as ``str`` or ``None``."""
-    element = message.get(attr)
-    if element is None or len(element) == 0:
-        return None
-    return str(element[0])
 
 
 class SambaUserIO:
@@ -224,23 +206,11 @@ class SambaUserIO:
             base=self.samdb.domain_dn(),
             scope=ldb.SCOPE_SUBTREE,
             expression=expression,
-            attrs=USER_ATTRS,
+            attrs=samba_user_io.USER_ATTRS,
         )
         if len(res) == 0:
             return None
-        message = res[0]
-        uac_raw = _first_value(message, "userAccountControl")
-        uac = int(uac_raw) if uac_raw is not None else 0
-        return {
-            "given_name": _first_value(message, "givenName"),
-            "surname": _first_value(message, "sn"),
-            "display_name": _first_value(message, "displayName"),
-            "email": _first_value(message, "mail"),
-            "description": _first_value(message, "description"),
-            "enabled": not bool(uac & logic.UAC_ACCOUNTDISABLE),
-            "_dn": str(message.dn),
-            "_uac": uac,
-        }
+        return samba_user_io.message_to_state(res[0])
 
     def create_user(self, username, password):
         """Create the base user object.

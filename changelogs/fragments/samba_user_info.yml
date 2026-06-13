@@ -1,0 +1,3 @@
+---
+minor_changes:
+  - samba_user_info - new module to query users from a Samba AD DC.
