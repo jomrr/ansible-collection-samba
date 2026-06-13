@@ -2,7 +2,7 @@
 # Provision a Samba AD DC inside each container and run it as a plain daemon
 # (no systemd). The base images are the stock distribution images, which ship
 # no python3, so it is bootstrapped via raw before facts are gathered. Distro
-# differences are handled via os_family variables. See
+# differences are handled via os_family facts. See
 # architecture/decisions.md (DC Test Topology, Container Runtime).
 - name: Prepare Samba AD DC
   hosts: all
@@ -14,7 +14,7 @@
       Suse: [samba-ad-dc, samba-tool, samba-dsdb-modules, samba-client, samba-python3, python313-cryptography, krb5-client]
     samba_fqdn: "{{ inventory_hostname }}.{{ samba_realm | lower }}"
   tasks:
-    - name: prepare | Bootstrap python3 (stock base images ship none)
+    - name: Prepare | Bootstrap python3 (stock base images ship none)
       # The podman connection shlex-splits and execs argv directly (no shell),
       # so shell logic must run via an explicit /bin/sh -c.
       ansible.builtin.raw: >-
@@ -26,28 +26,28 @@
         zypper --non-interactive --gpg-auto-import-keys install -y python3; fi'
       changed_when: false
 
-    - name: prepare | Gather facts now that python3 is present
+    - name: Prepare | Gather facts now that python3 is present
       ansible.builtin.setup:
 
-    - name: prepare | Refresh apt cache (Debian family)
+    - name: Prepare | Refresh apt cache (Debian family)
       ansible.builtin.apt:
         update_cache: true
-      when: ansible_os_family == "Debian"
+      when: ansible_facts['os_family'] == "Debian"
 
-    - name: prepare | Refresh zypper cache (Suse family)
+    - name: Prepare | Refresh zypper cache (Suse family)
       ansible.builtin.command:
         cmd: zypper --non-interactive --gpg-auto-import-keys refresh
       changed_when: false
-      when: ansible_os_family == "Suse"
+      when: ansible_facts['os_family'] == "Suse"
 
-    - name: prepare | Install Samba AD DC packages
+    - name: Prepare | Install Samba AD DC packages
       ansible.builtin.package:
-        name: "{{ _samba_packages[ansible_os_family] }}"
+        name: "{{ _samba_packages[ansible_facts['os_family']] }}"
         state: present
       environment:
         DEBIAN_FRONTEND: noninteractive
 
-    - name: prepare | Ensure the FQDN resolves to loopback
+    - name: Prepare | Ensure the FQDN resolves to loopback
       ansible.builtin.lineinfile:
         path: /etc/hosts
         line: "127.0.0.1 {{ samba_fqdn }} {{ inventory_hostname }}"
@@ -56,18 +56,18 @@
         # /etc/hosts is a podman bind-mount; atomic rename is not possible.
         unsafe_writes: true
 
-    - name: prepare | Check whether the domain is already provisioned
+    - name: Prepare | Check whether the domain is already provisioned
       ansible.builtin.stat:
         path: /var/lib/samba/private/sam.ldb
       register: _samdb
 
-    - name: prepare | Remove stock smb.conf before provisioning
+    - name: Prepare | Remove stock smb.conf before provisioning
       ansible.builtin.file:
         path: /etc/samba/smb.conf
         state: absent
       when: not _samdb.stat.exists
 
-    - name: prepare | Constrain idmap xid range to fit the rootless user namespace
+    - name: Prepare | Constrain idmap xid range to fit the rootless user namespace
       # The default s4 idmap range (3,000,000-4,000,000) lies OUTSIDE the
       # rootless podman subordinate-id map (~65536 ids), so the sysvol chown
       # during the DC self-join hits an unmappable xid and Samba panics. Low
@@ -83,7 +83,7 @@
         label: "{{ item.replace }}"
       when: not _samdb.stat.exists
 
-    - name: prepare | Provision the Samba AD domain
+    - name: Prepare | Provision the Samba AD domain
       ansible.builtin.command:
         cmd: >-
           samba-tool domain provision
@@ -96,27 +96,27 @@
         creates: /var/lib/samba/private/sam.ldb
       no_log: true
 
-    - name: prepare | Install the generated krb5.conf
+    - name: Prepare | Install the generated krb5.conf
       ansible.builtin.copy:
         src: /var/lib/samba/private/krb5.conf
         dest: /etc/krb5.conf
         remote_src: true
         mode: "0644"
 
-    - name: prepare | Check whether the samba daemon is already running
+    - name: Prepare | Check whether the samba daemon is already running
       ansible.builtin.command:
         cmd: pgrep -x samba
       register: _samba_pg
       failed_when: false
       changed_when: false
 
-    - name: prepare | Start the Samba AD DC daemon
+    - name: Prepare | Start the Samba AD DC daemon
       ansible.builtin.command:
         cmd: samba --daemon
       changed_when: true
       when: _samba_pg.rc != 0
 
-    - name: prepare | Wait until the local directory is queryable
+    - name: Prepare | Wait until the local directory is queryable
       # The modules use a local SamDB connection (system session), so a local
       # samba-tool query is the meaningful readiness gate; it also avoids a
       # samba-tool version quirk that rejects an explicit 127.0.0.1.
@@ -131,18 +131,18 @@
     # Seed objects that converge.yml will modify / disable / delete / purge, so
     # those transitions are real changes on the first converge and no-ops on the
     # second (the idempotence check). Seeding lives here, never in converge.
-    - name: prepare | Seed objects for the converge transition tests
+    - name: Prepare | Seed objects for the converge transition tests
       vars:
         _seed_password: "{{ samba_admin_password }}"
       block:
-        - name: prepare | seed | user whose attribute converge will change
+        - name: Prepare | seed | user whose attribute converge will change
           jomrr.samba.samba_user:
             username: tomodify
             display_name: Old Name
             password: "{{ _seed_password }}"
             state: present
 
-        - name: prepare | seed | user whose several attributes converge will change
+        - name: Prepare | seed | user whose several attributes converge will change
           jomrr.samba.samba_user:
             username: multiattr
             display_name: Old Multi
@@ -150,33 +150,33 @@
             password: "{{ _seed_password }}"
             state: present
 
-        - name: prepare | seed | user converge will disable
+        - name: Prepare | seed | user converge will disable
           jomrr.samba.samba_user:
             username: todisable
             enabled: true
             password: "{{ _seed_password }}"
             state: present
 
-        - name: prepare | seed | disabled user converge will re-enable
+        - name: Prepare | seed | disabled user converge will re-enable
           jomrr.samba.samba_user:
             username: toenable
             enabled: false
             password: "{{ _seed_password }}"
             state: present
 
-        - name: prepare | seed | user converge will delete
+        - name: Prepare | seed | user converge will delete
           jomrr.samba.samba_user:
             username: todelete
             password: "{{ _seed_password }}"
             state: present
 
-        - name: prepare | seed | extra member converge will purge from a group
+        - name: Prepare | seed | extra member converge will purge from a group
           jomrr.samba.samba_user:
             username: extrauser
             password: "{{ _seed_password }}"
             state: present
 
-        - name: prepare | seed | group converge will reduce from three members to one
+        - name: Prepare | seed | group converge will reduce from three members to one
           jomrr.samba.samba_group:
             name: crew
             scope: global
@@ -184,7 +184,7 @@
             members: [extrauser, tomodify, toenable]
             state: present
 
-        - name: prepare | seed | group with a member converge will add to (additive)
+        - name: Prepare | seed | group with a member converge will add to (additive)
           jomrr.samba.samba_group:
             name: addmembers
             scope: global
@@ -192,27 +192,27 @@
             members: [extrauser]
             state: present
 
-        - name: prepare | seed | global group whose scope converge will change to universal
+        - name: Prepare | seed | global group whose scope converge will change to universal
           jomrr.samba.samba_group:
             name: scopechange
             scope: global
             category: security
             state: present
 
-        - name: prepare | seed | OU whose description converge will change
+        - name: Prepare | seed | OU whose description converge will change
           jomrr.samba.samba_ou:
             name: oldou
             path: "{{ samba_base_dn }}"
             description: Old OU description
             state: present
 
-        - name: prepare | seed | OU converge will delete
+        - name: Prepare | seed | OU converge will delete
           jomrr.samba.samba_ou:
             name: todelete_ou
             path: "{{ samba_base_dn }}"
             state: present
 
-        - name: prepare | seed | OUs for the move tests
+        - name: Prepare | seed | OUs for the move tests
           jomrr.samba.samba_ou:
             name: "{{ item }}"
             path: "{{ samba_base_dn }}"
@@ -221,21 +221,21 @@
             - loc_a
             - loc_b
 
-        - name: prepare | seed | nested OU whose description converge will change
+        - name: Prepare | seed | nested OU whose description converge will change
           jomrr.samba.samba_ou:
             name: submod
             path: "OU=loc_a,{{ samba_base_dn }}"
             description: Old nested description
             state: present
 
-        - name: prepare | seed | user converge will move to another OU
+        - name: Prepare | seed | user converge will move to another OU
           jomrr.samba.samba_user:
             username: mover
             password: "{{ _seed_password }}"
             path: "OU=loc_a,{{ samba_base_dn }}"
             state: present
 
-        - name: prepare | seed | user converge will move AND change an attribute on
+        - name: Prepare | seed | user converge will move AND change an attribute on
           jomrr.samba.samba_user:
             username: moverattr
             display_name: Old MoverAttr
@@ -243,7 +243,7 @@
             path: "OU=loc_a,{{ samba_base_dn }}"
             state: present
 
-        - name: prepare | seed | group converge will move to another OU
+        - name: Prepare | seed | group converge will move to another OU
           jomrr.samba.samba_group:
             name: gmover
             path: "OU=loc_a,{{ samba_base_dn }}"

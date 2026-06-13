@@ -5,6 +5,5 @@
 profile: production
 
 exclude_paths:
-  - extensions/molecule/
   - changelogs/
   - .github/

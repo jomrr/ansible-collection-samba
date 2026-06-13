@@ -18,7 +18,7 @@
   vars:
     _password: "{{ samba_admin_password }}"
   tasks:
-    - name: converge | Create a user with the common attributes
+    - name: Converge | Create a user with the common attributes
       jomrr.samba.samba_user:
         username: jane
         given_name: Jane
@@ -30,13 +30,13 @@
         password: "{{ _password }}"
         state: present
 
-    - name: converge | Change an attribute on an existing user
+    - name: Converge | Change an attribute on an existing user
       jomrr.samba.samba_user:
         username: tomodify
         display_name: New Name
         state: present
 
-    - name: converge | Change several attributes on an existing user at once
+    - name: Converge | Change several attributes on an existing user at once
       jomrr.samba.samba_user:
         username: multiattr
         given_name: Multi
@@ -46,29 +46,29 @@
         description: New multi description
         state: present
 
-    - name: converge | Disable an existing user
+    - name: Converge | Disable an existing user
       jomrr.samba.samba_user:
         username: todisable
         enabled: false
         state: present
 
-    - name: converge | Re-enable a disabled user
+    - name: Converge | Re-enable a disabled user
       jomrr.samba.samba_user:
         username: toenable
         enabled: true
         state: present
 
-    - name: converge | Remove a user
+    - name: Converge | Remove a user
       jomrr.samba.samba_user:
         username: todelete
         state: absent
 
-    - name: converge | Absent on a non-existent user is a no-op
+    - name: Converge | Absent on a non-existent user is a no-op
       jomrr.samba.samba_user:
         username: ghost
         state: absent
 
-    - name: converge | Create a global security group with a member (additive)
+    - name: Converge | Create a global security group with a member (additive)
       jomrr.samba.samba_group:
         name: engineers
         scope: global
@@ -78,7 +78,7 @@
           - jane
         state: present
 
-    - name: converge | Reduce a 3-member group to one authoritative member (purge)
+    - name: Converge | Reduce a 3-member group to one authoritative member (purge)
       jomrr.samba.samba_group:
         name: crew
         members:
@@ -86,79 +86,79 @@
         members_purge: true
         state: present
 
-    - name: converge | Add a member to a group that already has one (additive)
+    - name: Converge | Add a member to a group that already has one (additive)
       jomrr.samba.samba_group:
         name: addmembers
         members:
           - jane
         state: present
 
-    - name: converge | Change a group's scope (global -> universal)
+    - name: Converge | Change a group's scope (global -> universal)
       jomrr.samba.samba_group:
         name: scopechange
         scope: universal
         category: security
         state: present
 
-    - name: converge | Create a top-level OU
+    - name: Converge | Create a top-level OU
       jomrr.samba.samba_ou:
         name: department
         path: "{{ samba_base_dn }}"
         description: Department OU
         state: present
 
-    - name: converge | Create a nested OU (its parent was just created)
+    - name: Converge | Create a nested OU (its parent was just created)
       jomrr.samba.samba_ou:
         name: team
         path: "OU=department,{{ samba_base_dn }}"
         state: present
 
-    - name: converge | Create a third-level nested OU (parents just created)
+    - name: Converge | Create a third-level nested OU (parents just created)
       jomrr.samba.samba_ou:
         name: squad
         path: "OU=team,OU=department,{{ samba_base_dn }}"
         state: present
 
-    - name: converge | Change an existing OU's description
+    - name: Converge | Change an existing OU's description
       jomrr.samba.samba_ou:
         name: oldou
         path: "{{ samba_base_dn }}"
         description: New OU description
         state: present
 
-    - name: converge | Change a nested OU's description
+    - name: Converge | Change a nested OU's description
       jomrr.samba.samba_ou:
         name: submod
         path: "OU=loc_a,{{ samba_base_dn }}"
         description: New nested description
         state: present
 
-    - name: converge | Remove an (empty) OU
+    - name: Converge | Remove an (empty) OU
       jomrr.samba.samba_ou:
         name: todelete_ou
         path: "{{ samba_base_dn }}"
         state: absent
 
-    - name: converge | Absent on a non-existent OU is a no-op
+    - name: Converge | Absent on a non-existent OU is a no-op
       jomrr.samba.samba_ou:
         name: ghostou
         path: "{{ samba_base_dn }}"
         state: absent
 
-    - name: converge | Create a user directly in an OU
+    - name: Converge | Create a user directly in an OU
       jomrr.samba.samba_user:
         username: placed
         password: "{{ _password }}"
         path: "OU=loc_a,{{ samba_base_dn }}"
         state: present
 
-    - name: converge | Move a user to another OU (idempotent move)
+    - name: Converge | Move a user to another OU (idempotent move)
       jomrr.samba.samba_user:
         username: mover
         path: "OU=loc_b,{{ samba_base_dn }}"
         state: present
 
-    - name: converge | Move a user to another OU AND change an attribute at once
+    - name: Converge | Move a user to another OU AND change an attribute at once
       # Exercises the documented create -> move -> attributes order: the
       # displayName write must land on the post-move DN.
       jomrr.samba.samba_user:
@@ -167,19 +167,19 @@
         path: "OU=loc_b,{{ samba_base_dn }}"
         state: present
 
-    - name: converge | Create a group directly in an OU
+    - name: Converge | Create a group directly in an OU
       jomrr.samba.samba_group:
         name: gplaced
         path: "OU=loc_a,{{ samba_base_dn }}"
         state: present
 
-    - name: converge | Move a group to another OU (idempotent move)
+    - name: Converge | Move a group to another OU (idempotent move)
       jomrr.samba.samba_group:
         name: gmover
         path: "OU=loc_b,{{ samba_base_dn }}"
         state: present
 
-    - name: converge | Create a group with a member directly in an OU (path + members)
+    - name: Converge | Create a group with a member directly in an OU (path + members)
       jomrr.samba.samba_group:
         name: gstaff
         path: "OU=loc_a,{{ samba_base_dn }}"
