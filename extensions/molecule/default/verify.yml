@@ -1,10 +1,77 @@
 ---
-# Verify: idempotence is asserted by molecule's second converge run.
-# Add explicit state assertions here as modules land.
+# Verify the converged state by reading it back through the *_info modules.
+# (Idempotence itself is asserted by molecule's second converge run.)
 - name: Verify
   hosts: all
   gather_facts: false
   tasks:
-    - name: verify | Placeholder for state assertions
-      ansible.builtin.debug:
-        msg: "TODO Iter 1: assert created objects exist and match desired state"
+    - name: verify | Read the created user
+      jomrr.samba.samba_user_info:
+        username: jane
+      register: _jane
+
+    - name: verify | The user exists with the expected attributes, enabled
+      ansible.builtin.assert:
+        that:
+          - _jane.users | length == 1
+          - _jane.users[0].given_name == "Jane"
+          - _jane.users[0].surname == "Doe"
+          - _jane.users[0].display_name == "Jane Doe"
+          - _jane.users[0].email == "jane.doe@example.com"
+          - _jane.users[0].enabled is true
+
+    - name: verify | Read the modified user
+      jomrr.samba.samba_user_info:
+        username: tomodify
+      register: _tomodify
+
+    - name: verify | The attribute change is present
+      ansible.builtin.assert:
+        that:
+          - _tomodify.users[0].display_name == "New Name"
+
+    - name: verify | Read the disabled user
+      jomrr.samba.samba_user_info:
+        username: todisable
+      register: _todisable
+
+    - name: verify | The user is disabled
+      ansible.builtin.assert:
+        that:
+          - _todisable.users[0].enabled is false
+
+    - name: verify | Read the deleted user
+      jomrr.samba.samba_user_info:
+        username: todelete
+      register: _todelete
+
+    - name: verify | The deleted user is gone
+      ansible.builtin.assert:
+        that:
+          - _todelete.users | length == 0
+
+    - name: verify | Read the created group
+      jomrr.samba.samba_group_info:
+        name: engineers
+      register: _engineers
+
+    - name: verify | The group has the right type and member
+      ansible.builtin.assert:
+        that:
+          - _engineers.groups | length == 1
+          - _engineers.groups[0].scope == "global"
+          - _engineers.groups[0].category == "security"
+          - _engineers.groups[0].members | length == 1
+          - "'jane' in (_engineers.groups[0].members | join(' ') | lower)"
+
+    - name: verify | Read the purged group
+      jomrr.samba.samba_group_info:
+        name: crew
+      register: _crew
+
+    - name: verify | Authoritative membership kept only the listed member
+      ansible.builtin.assert:
+        that:
+          - _crew.groups[0].members | length == 1
+          - "'tomodify' in (_crew.groups[0].members | join(' ') | lower)"
+          - "'extrauser' not in (_crew.groups[0].members | join(' ') | lower)"

@@ -1,25 +1,53 @@
 ---
-# Integration scenario. Targets the PRE-BUILT systemd-enabled images.
-# Claude Code does NOT build or modify these images — only references them.
-# Replace the image refs / distro matrix with your actual registry tags.
+# Integration scenario. Targets the PRE-BUILT images (referenced, never built
+# or modified here). Rootless podman; the DC containers run privileged for the
+# test environment (see architecture/decisions.md, Container Runtime).
+#
+# The DC runs Samba as a plain daemon (started in prepare.yml), NOT under
+# systemd: that keeps each container's resource footprint small (no PID1 init /
+# journald), so the full distro matrix runs even alongside other containers.
+#
+# /var/lib/samba is a per-run tmpfs: it lives in the container's own mount
+# namespace, where the native security.NTACL xattr is writable, and gives each
+# run a clean, disposable domain.
 
 driver:
   name: podman
 
 platforms:
-  - name: samba-dc-fedora
-    image: CHANGEME/molecule-systemd-fedora:43
-    command: /usr/sbin/init
-    systemd: always
-    # rootless cgroups v2: prefer host cgroupns + tmpfs over full privileged
-    # where the image allows it; adjust per ADR 0001 findings.
-    cgroupns_mode: host
+  - name: samba-debian
+    image: docker.io/debian:stable
+    pre_build_image: true
     privileged: true
-    volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: samba-fedora
+    image: docker.io/fedora:latest
+    pre_build_image: true
+    privileged: true
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: samba-opensuse
+    image: docker.io/opensuse/tumbleweed:latest
+    pre_build_image: true
+    privileged: true
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: samba-ubuntu
+    image: docker.io/ubuntu:latest
+    pre_build_image: true
+    privileged: true
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
 
 provisioner:
   name: ansible
+  inventory:
+    group_vars:
+      all:
+        samba_realm: SAMDOM.EXAMPLE.COM
+        samba_domain: SAMDOM
+        samba_admin_password: "P@ssw0rd-Int3gration"
   playbooks:
     prepare: prepare.yml
     converge: converge.yml

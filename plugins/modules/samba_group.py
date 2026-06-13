@@ -171,10 +171,8 @@ from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
-
-#: LDAP attributes read to build the current group state.
-GROUP_ATTRS = ["sAMAccountName", "groupType", "description", "member"]
 
 
 class SambaGroupIO:
@@ -195,20 +193,11 @@ class SambaGroupIO:
             base=self.samdb.domain_dn(),
             scope=ldb.SCOPE_SUBTREE,
             expression=expression,
-            attrs=GROUP_ATTRS,
+            attrs=samba_group_io.GROUP_ATTRS,
         )
         if len(res) == 0:
             return None
-        message = res[0]
-        group_type_raw = samba_user_io.first_value(message, "groupType")
-        members_element = message.get("member")
-        members = [str(value) for value in members_element] if members_element is not None else []
-        return {
-            "description": samba_user_io.first_value(message, "description"),
-            "group_type": int(group_type_raw) if group_type_raw is not None else 0,
-            "members": members,
-            "_dn": str(message.dn),
-        }
+        return samba_group_io.message_to_state(res[0])
 
     def resolve_member(self, name):
         """Resolve a member's sAMAccountName to its DN; the name is escaped."""

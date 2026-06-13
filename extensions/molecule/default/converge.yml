@@ -1,9 +1,63 @@
 ---
-# Converge: exercise the modules against the local DC. STUB for Iter 1.
+# Exercise all four modules against the real DC. This playbook must be fully
+# idempotent: molecule runs it twice and the second run must report no changes.
+# Objects that are modified/disabled/deleted/purged here were seeded in
+# prepare.yml, so those transitions happen on the first run and are no-ops on
+# the second.
 - name: Converge
   hosts: all
   gather_facts: false
+  vars:
+    _password: "{{ samba_admin_password }}"
   tasks:
-    - name: converge | Placeholder for module calls
-      ansible.builtin.debug:
-        msg: "TODO Iter 1: call samba_user / samba_group / samba_ou / samba_dns_record"
+    - name: converge | Create a user with the common attributes
+      jomrr.samba.samba_user:
+        username: jane
+        given_name: Jane
+        surname: Doe
+        display_name: Jane Doe
+        email: jane.doe@example.com
+        description: Integration test user
+        enabled: true
+        password: "{{ _password }}"
+        state: present
+
+    - name: converge | Change an attribute on an existing user
+      jomrr.samba.samba_user:
+        username: tomodify
+        display_name: New Name
+        state: present
+
+    - name: converge | Disable an existing user
+      jomrr.samba.samba_user:
+        username: todisable
+        enabled: false
+        state: present
+
+    - name: converge | Remove a user
+      jomrr.samba.samba_user:
+        username: todelete
+        state: absent
+
+    - name: converge | Absent on a non-existent user is a no-op
+      jomrr.samba.samba_user:
+        username: ghost
+        state: absent
+
+    - name: converge | Create a global security group with a member (additive)
+      jomrr.samba.samba_group:
+        name: engineers
+        scope: global
+        category: security
+        description: Engineering team
+        members:
+          - jane
+        state: present
+
+    - name: converge | Reduce a group to an authoritative member set (purge)
+      jomrr.samba.samba_group:
+        name: crew
+        members:
+          - tomodify
+        members_purge: true
+        state: present
