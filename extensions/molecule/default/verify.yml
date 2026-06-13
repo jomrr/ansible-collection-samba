@@ -75,3 +75,17 @@
           - _crew.groups[0].members | length == 1
           - "'tomodify' in (_crew.groups[0].members | join(' ') | lower)"
           - "'extrauser' not in (_crew.groups[0].members | join(' ') | lower)"
+
+    # No samba_ou_info module yet, so OUs are verified read-only via samba-tool.
+    - name: verify | List the organizational units
+      ansible.builtin.command:
+        cmd: samba-tool ou list
+      register: _ou_list
+      changed_when: false
+
+    - name: verify | The OUs (incl. nested) exist and the deleted one is gone
+      ansible.builtin.assert:
+        that:
+          - _ou_list.stdout is search('OU=department')
+          - _ou_list.stdout is search('OU=team,OU=department')
+          - not (_ou_list.stdout is search('todelete_ou'))

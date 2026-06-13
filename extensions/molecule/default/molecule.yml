@@ -48,6 +48,7 @@ provisioner:
         samba_realm: SAMDOM.EXAMPLE.COM
         samba_domain: SAMDOM
         samba_admin_password: "P@ssw0rd-Int3gration"
+        samba_base_dn: "DC={{ samba_realm | lower | replace('.', ',DC=') }}"
   playbooks:
     prepare: prepare.yml
     converge: converge.yml

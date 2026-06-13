@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# Copyright: (c) 2026, Jonas
+# Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to query users from a Samba AD DC via the python bindings."""
 

@@ -3,7 +3,7 @@ name: samba
 version: 0.1.0
 readme: README.md
 authors:
-  - Jonas
+  - Jonas Mauer
 description: >-
   Manage Samba AD DC objects (users, groups, OUs) and Samba internal DNS
   records via native Python bindings.

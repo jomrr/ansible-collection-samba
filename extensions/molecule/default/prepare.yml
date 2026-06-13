@@ -168,3 +168,16 @@
             category: security
             members: [extrauser]
             state: present
+
+        - name: prepare | seed | OU whose description converge will change
+          jomrr.samba.samba_ou:
+            name: oldou
+            path: "{{ samba_base_dn }}"
+            description: Old OU description
+            state: present
+
+        - name: prepare | seed | OU converge will delete
+          jomrr.samba.samba_ou:
+            name: todelete_ou
+            path: "{{ samba_base_dn }}"
+            state: present

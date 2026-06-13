@@ -1,0 +1,3 @@
+---
+minor_changes:
+  - New module samba_ou to manage organizational units in a Samba AD DC.

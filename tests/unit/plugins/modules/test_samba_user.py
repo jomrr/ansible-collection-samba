@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright: (c) 2026, Jonas
+# Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_user module orchestration.
 

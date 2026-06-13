@@ -61,3 +61,35 @@
           - tomodify
         members_purge: true
         state: present
+
+    - name: converge | Create a top-level OU
+      jomrr.samba.samba_ou:
+        name: department
+        path: "{{ samba_base_dn }}"
+        description: Department OU
+        state: present
+
+    - name: converge | Create a nested OU (its parent was just created)
+      jomrr.samba.samba_ou:
+        name: team
+        path: "OU=department,{{ samba_base_dn }}"
+        state: present
+
+    - name: converge | Change an existing OU's description
+      jomrr.samba.samba_ou:
+        name: oldou
+        path: "{{ samba_base_dn }}"
+        description: New OU description
+        state: present
+
+    - name: converge | Remove an (empty) OU
+      jomrr.samba.samba_ou:
+        name: todelete_ou
+        path: "{{ samba_base_dn }}"
+        state: absent
+
+    - name: converge | Absent on a non-existent OU is a no-op
+      jomrr.samba.samba_ou:
+        name: ghostou
+        path: "{{ samba_base_dn }}"
+        state: absent

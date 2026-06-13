@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright: (c) 2026, Jonas
+# Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for samba_conn. These run in the sanity/units container WITHOUT
 the samba bindings present, which is exactly what we want to verify: importing
