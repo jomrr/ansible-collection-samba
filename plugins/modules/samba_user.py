@@ -63,12 +63,27 @@ options:
     default: true
   password:
     description:
-      - The initial password for the account.
-      - Only used when the user is created; it is never read back and never
-        compared, so it does not affect idempotency and is not changed on
-        subsequent runs.
+      - The password for the account.
+      - By default it is only applied when the user is created; use
+        I(update_password) to also set it on an existing user.
+      - It is never read back and never compared, so it never appears in the
+        return value or the diff.
       - Required when a new user has to be created.
     type: str
+  update_password:
+    description:
+      - C(on_create) (the default) only sets I(password) when the user is
+        created; an existing user's password is left untouched, so repeated
+        runs stay idempotent (C(changed=false)).
+      - C(always) sets I(password) on every run for an existing user as well.
+        Because the password cannot be read back to compare, the module then
+        always reports C(changed=true) - the write itself is the change.
+      - Has no effect unless I(password) is set.
+    type: str
+    default: on_create
+    choices:
+      - on_create
+      - always
   state:
     description:
       - Whether the user should exist (C(present)) or not (C(absent)).
@@ -287,6 +302,26 @@ class SambaUserIO:
                 return False
             raise
 
+    def set_password(self, username, password):
+        """Set the password of an existing user.
+
+        Uses samba's ``setpassword`` - the same mechanism as
+        C(samba-tool user setpassword) - so password policy and encoding are
+        handled by samba. The username is escaped before it enters the search
+        filter. Fails cleanly if the object was removed (concurrent delete)
+        before the write reached the DC.
+        """
+        ldb = self._ldb()
+        search_filter = "(sAMAccountName=%s)" % ldb.binary_encode(username)
+        try:
+            self.samdb.setpassword(search_filter, password)
+        except ldb.LdbError as err:
+            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
+                raise logic.SambaUserError(
+                    "user '%s' vanished before its password could be set" % username
+                )
+            raise
+
 
 def main():
     """Module entry point."""
@@ -299,6 +334,7 @@ def main():
         description=dict(type="str"),
         enabled=dict(type="bool", default=True),
         password=dict(type="str", no_log=True),
+        update_password=dict(type="str", default="on_create", choices=["on_create", "always"]),
         state=dict(type="str", default="present", choices=["present", "absent"]),
     )
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)

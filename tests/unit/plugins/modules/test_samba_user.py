@@ -52,6 +52,9 @@ class FakeIO:
         self.current = None
         return True
 
+    def set_password(self, username, password):
+        self.calls.append(("set_password", username, password))
+
 
 def make_params(**over):
     params = {
@@ -63,6 +66,7 @@ def make_params(**over):
         "description": None,
         "enabled": True,
         "password": None,
+        "update_password": "on_create",
         "state": "present",
     }
     params.update(over)
@@ -196,3 +200,60 @@ def test_password_not_leaked_in_check_mode():
     fake = FakeIO(current=None)
     result = logic.run(make_params(password="S3cret!"), True, fake)
     assert "S3cret!" not in repr(result)
+
+
+def test_on_create_existing_user_does_not_set_password():
+    # update_password=on_create (default): existing user, identical attrs ->
+    # password is left untouched and the run stays idempotent.
+    fake = FakeIO(current=existing_user(given_name="Jane"))
+    result = logic.run(
+        make_params(given_name="Jane", password="S3cret!", update_password="on_create"),
+        False, fake,
+    )
+    assert result["changed"] is False
+    assert "set_password" not in call_names(fake)
+
+
+def test_always_existing_user_sets_password_and_changes():
+    # update_password=always: password is written even though attrs are
+    # unchanged, and that write is honestly reported as changed:true.
+    fake = FakeIO(current=existing_user(given_name="Jane"))
+    result = logic.run(
+        make_params(given_name="Jane", password="S3cret!", update_password="always"),
+        False, fake,
+    )
+    assert result["changed"] is True
+    assert result["action"] == "modified"
+    assert ("set_password", "jdoe", "S3cret!") in fake.calls
+
+
+def test_always_existing_user_check_mode_no_write_but_changed():
+    fake = FakeIO(current=existing_user(given_name="Jane"))
+    result = logic.run(
+        make_params(given_name="Jane", password="S3cret!", update_password="always"),
+        True, fake,
+    )
+    assert result["changed"] is True
+    assert "set_password" not in call_names(fake)
+
+
+def test_always_password_not_leaked():
+    fake = FakeIO(current=existing_user(given_name="Jane"))
+    result = logic.run(
+        make_params(given_name="Jane", password="S3cret!", update_password="always"),
+        False, fake,
+    )
+    assert "S3cret!" not in repr(result)
+    assert "S3cret!" not in repr(result["diff"])
+    assert "S3cret!" not in repr(result["user"])
+
+
+def test_always_without_password_does_not_write():
+    # update_password=always but no password supplied -> nothing to set, and an
+    # unchanged existing user stays changed:false.
+    fake = FakeIO(current=existing_user(given_name="Jane"))
+    result = logic.run(
+        make_params(given_name="Jane", update_password="always"), False, fake,
+    )
+    assert result["changed"] is False
+    assert "set_password" not in call_names(fake)

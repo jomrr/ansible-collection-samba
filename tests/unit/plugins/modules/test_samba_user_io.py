@@ -70,13 +70,16 @@ class FoundMessage:
 class FakeSamDB:
     """Configurable fake SamDB; raise_* inject errors for the race tests."""
 
-    def __init__(self, search_result=None, newuser_error=None, modify_error=None, delete_error=None):
+    def __init__(self, search_result=None, newuser_error=None, modify_error=None,
+                 delete_error=None, setpassword_error=None):
         self.search_result = [] if search_result is None else search_result
         self.newuser_error = newuser_error
         self.modify_error = modify_error
         self.delete_error = delete_error
+        self.setpassword_error = setpassword_error
         self.captured = {}
         self.deleted = []
+        self.setpassword_filters = []
 
     def domain_dn(self):
         return "DC=example,DC=com"
@@ -97,6 +100,12 @@ class FakeSamDB:
         if self.delete_error is not None:
             raise self.delete_error
         self.deleted.append(dn)
+
+    def setpassword(self, search_filter, password):
+        if self.setpassword_error is not None:
+            raise self.setpassword_error
+        # Record only the filter, never the password.
+        self.setpassword_filters.append(search_filter)
 
 
 def make_io(fake_ldb, samdb):
@@ -175,3 +184,26 @@ def test_delete_user_success_returns_true():
     samdb = FakeSamDB()
     assert make_io(fake_ldb, samdb).delete_user("CN=jdoe,DC=example,DC=com") is True
     assert samdb.deleted  # delete actually issued
+
+
+def test_set_password_escapes_filter_value():
+    fake_ldb = FakeLdb()
+    samdb = FakeSamDB()
+    make_io(fake_ldb, samdb).set_password("evil)(uid=*)", "pw")
+    # The raw value was passed through the escaper before entering the filter.
+    assert fake_ldb.encoded == ["evil)(uid=*)"]
+    assert samdb.setpassword_filters == ["(sAMAccountName=%s)" % ("ESC(%s)" % "evil)(uid=*)")]
+
+
+def test_set_password_vanished_raises_clean():
+    fake_ldb = FakeLdb()
+    samdb = FakeSamDB(setpassword_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
+    with pytest.raises(logic.SambaUserError):
+        make_io(fake_ldb, samdb).set_password("jdoe", "pw")
+
+
+def test_set_password_other_ldberror_propagates():
+    fake_ldb = FakeLdb()
+    samdb = FakeSamDB(setpassword_error=FakeLdbError(999, "boom"))
+    with pytest.raises(FakeLdbError):
+        make_io(fake_ldb, samdb).set_password("jdoe", "pw")

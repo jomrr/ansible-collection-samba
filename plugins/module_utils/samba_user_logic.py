@@ -137,26 +137,44 @@ def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
     ``io`` provides ``read_current``, ``create_user``, ``apply_attrs``,
-    ``set_enabled`` and ``delete_user``. Injecting it keeps this function
-    testable without the samba bindings.
+    ``set_enabled``, ``set_password`` and ``delete_user``. Injecting it keeps
+    this function testable without the samba bindings.
     """
     username = params["username"]
     state = params["state"]
+    password = params.get("password")
+    update_password = params["update_password"]
     desired = build_desired(params)
 
     current = io.read_current(username)
     planned = plan(state, current, desired)
 
-    if planned["action"] == "create" and not params.get("password"):
+    if planned["action"] == "create" and not password:
         raise SambaUserError("password is required to create user '%s'" % username)
 
+    # update_password=always sets the password on an existing user on every run.
+    # The password cannot be read back to diff, so the write itself is the
+    # change we make -> reporting changed:true here is honest, not an idempotency
+    # break. (On create the password is already set via create_user.)
+    set_pw_on_existing = (
+        state == "present"
+        and current is not None
+        and password is not None
+        and update_password == "always"
+    )
+
+    action = planned["action"]
+    if set_pw_on_existing and action == "none":
+        action = "modify"
+    changed = planned["changed"] or set_pw_on_existing
+
     result = {
-        "changed": planned["changed"],
-        "action": _ACTION_LABEL[planned["action"]],
+        "changed": changed,
+        "action": _ACTION_LABEL[action],
         "diff": build_diff(state, current, desired, planned),
     }
 
-    if not planned["changed"]:
+    if not changed:
         result["user"] = public_state(current, username)
         return result
 
@@ -183,7 +201,7 @@ def run(params, check_mode, io):
         return result
 
     if planned["action"] == "create":
-        io.create_user(username, params["password"])
+        io.create_user(username, password)
         current = io.read_current(username)
 
     if current is None:
@@ -193,6 +211,8 @@ def run(params, check_mode, io):
         io.apply_attrs(current["_dn"], planned["attr_changes"])
     if planned["enable_change"] is not None:
         io.set_enabled(current["_dn"], current["_uac"], planned["enable_change"])
+    if set_pw_on_existing:
+        io.set_password(username, password)
 
     result["user"] = public_state(io.read_current(username), username)
     return result
