@@ -282,3 +282,122 @@ departs from several collection conventions:
 
 Proposed to the maintainer in this phase (verification only). No module code is
 written until this decision is accepted; Phase 2 implements on this finding.
+
+---
+
+## Join module family (samba_join_dc / samba_join_member / samba_join_client)
+
+### Context
+
+Three setup modules join a host to an existing domain: `samba_join_dc` (a new
+Samba DC joins an existing domain), `samba_join_member` (a Samba member server,
+authenticating via winbind), and `samba_join_client` (a Linux client enrolment,
+with `backend: winbind | sssd`). Like `samba_provision`, these run locally on the
+joining host. The mechanism was verified against samba 4.23.8 before any code;
+this records the decisions, it does not reopen them.
+
+### Decision
+
+- **Strict module boundary.** Each module performs only the join act plus its
+  idempotency detection, and stops there. NOT in the module: smb.conf/sssd.conf
+  templating, enabling/starting daemons (winbind/sssd), or wiring the
+  nsswitch/PAM/authselect stack. Those are orchestration and belong in the
+  (later) role. Rationale (best practice + the Samba Backend decision): the
+  module owns only the stateful operation a `command` models badly; templating,
+  daemons and the host stack are orchestration the role owns. This boundary is
+  also forced by the mechanism: the Samba member join binding needs a configured
+  smb.conf (realm, workgroup, `server role = member server`) to already exist, so
+  the role configures smb.conf first and the module then performs the join
+  against it.
+- **Local-only, not in the `jomrr.samba.all` action group, `state` present
+  only**, binary idempotency - same shape as `samba_provision`. No `absent`
+  (un-joining is not offered in this family).
+
+### Verified mechanism (samba 4.23.8) and the bindings-vs-CLI finding
+
+The expectation that the member/client join is CLI-only is **largely refuted** -
+bindings exist for most of it; only the sssd backend is genuinely CLI-only:
+
+- **samba_join_dc - bindings.** `samba.join.join_DC(logger, server, creds, lp,
+  site, netbios_name, dns_backend, machinepass, ...)` (class `DCJoinContext`,
+  `do_join()`/`join_finalise()`). This is the binding behind `samba-tool domain
+  join <realm> DC`, analogous to `provision()`. Consistent with the Samba
+  Backend decision; lazy-imported.
+- **samba_join_member (winbind) - bindings.** The standard AD member join is
+  `samba.net_s3.Net(creds, s3_lp, server).join_member(dnshostname, createupn,
+  createcomputer, osName, osVer, osServicePack, machinepass)` - the source3
+  `net ads join` code path, which writes the machine secret to `secrets.tdb`
+  (what winbind reads). It is a real binding, not a subprocess. It does require a
+  configured smb.conf (the s3 LoadParm is loaded from it), which the role
+  provides per the boundary above. Lazy-imported.
+- **samba_join_client `backend=winbind`** uses the same mechanism as the member
+  join (net_s3 `join_member` -> `secrets.tdb`). At the join layer it is the same
+  operation as `samba_join_member`; the two differ only in the intended host role
+  and therefore in the role-level configuration, not the join act. (Noted as a
+  real overlap; the three-module split is nonetheless the chosen design.)
+- **samba_join_client `backend=sssd` - CLI only: the documented exception.**
+  There is no Python binding for `adcli` (it is a separate C tool from the realmd
+  project; `import adcli` does not exist). `adcli join` is the low-level
+  pure-join component (it creates the machine account and writes a Kerberos
+  **keytab**, which sssd reads, WITHOUT touching sssd.conf/nsswitch/PAM - exactly
+  the module boundary, unlike `realm join`, which does the whole stack). This is
+  the **first deliberate subprocess/CLI in the collection and a justified
+  exception to the bindings-only rule**: no binding exists, and `adcli` is the
+  correct boundary-respecting tool. The CLI call is wrapped and made safe (see
+  Security).
+
+### The `backend` parameter finding
+
+The AD-side act (creating the machine account) is backend-independent, but the
+**local secret store is not**: winbind reads `secrets.tdb` (populated by the
+net_s3 join), sssd reads a Kerberos keytab (populated by `adcli join`). So the
+join tool and the artifact it writes differ by backend, which means `backend` IS
+meaningful at the `samba_join_client` module level (it selects net_s3-join +
+secrets.tdb vs adcli-join + keytab) - not only at the role level. The hypothesis
+that the join is fully backend-independent is therefore only half true.
+
+### Idempotency discriminators (binary, per module)
+
+- **samba_join_dc:** a local `sam.ldb` exists AND its domain (realm / domain SID)
+  matches the join target. No `sam.ldb` -> not joined. A `sam.ldb` whose domain
+  differs from the target -> this host is already a DC of a *different* domain ->
+  clear error, never re-join. (This dissolves the provision-vs-join ambiguity:
+  the module ensures "this host is a DC of the target domain"; an existing
+  matching DC is the no-op. *Empirically to confirm: that the local DC's domain
+  identity is reliably readable to compare against the target.*)
+- **samba_join_member / client `backend=winbind`:** `net ads testjoin`
+  (`rc == 0` = the machine account is valid against the domain) is the robust
+  discriminator; `secrets.tdb` presence is the weaker fallback. (`testjoin` has
+  no clean binding, so the idempotency *check* uses the `net` CLI even though the
+  join itself uses the binding.)
+- **samba_join_client `backend=sssd`:** `adcli testjoin --domain=<realm>`
+  (`rc == 0` = joined).
+
+### Open design points
+
+- **check_mode:** joining cannot be dry-run; check_mode reads the join state
+  only (the discriminators above) and reports `changed` without joining.
+  `supports_check_mode=True` for all three.
+- **Security (rule 8):** the domain-admin join password is `no_log` and never
+  appears in return, diff, error or log. Credential passing, verified:
+  - bindings (join_DC, net_s3 join_member): via `samba.credentials.Credentials`
+    (`set_password`), never on a command line.
+  - `adcli join`: `--login-user=Administrator --stdin-password`, the password fed
+    on **stdin**, never as an argv (which would show in `ps`).
+  - `net` (for `testjoin` and any net call): credentials via the `PASSWD`
+    environment variable, never `-U user%password` on the command line.
+- **Race/TOCTOU (rule 9):** the window between the state check and the join is
+  negligible (one-time setup, not a concurrent path); a join failure is turned
+  into a clear `fail_json`, not a raw traceback.
+- **Imports/subprocess:** the binding paths are lazy-imported (`samba.join`,
+  `samba.net_s3`, `samba.credentials`, `samba.param`) like `samba_conn`; the
+  adcli/net paths are subprocesses whose only safety concern is credential
+  handling (above), not the sanity-container import constraint.
+
+### Status
+
+Proposed to the maintainer in this phase (verification only). No module code is
+written until this decision is accepted. The notable revisions to the initial
+expectation - member/winbind join has a binding (net_s3), the CLI exception is
+limited to the sssd/adcli path, and `backend` does matter at the module level -
+are flagged for the maintainer's acceptance before implementation.
