@@ -10,6 +10,8 @@ DOCUMENTATION = r"""
 module: samba_dns_zone
 short_description: Manage DNS zones in a Samba AD DC
 version_added: 0.1.0
+extends_documentation_fragment:
+  - jomrr.samba.connection
 description:
   - Create and remove AD-integrated DNS zones (forward and reverse) in a Samba
     Active Directory Domain Controller's internal DNS.
@@ -17,9 +19,9 @@ description:
     zones with secure dynamic updates enabled. Whether a zone is forward or
     reverse is determined by its O(name) (a reverse zone is named under
     C(in-addr.arpa) or C(ip6.arpa)).
-  - Zone existence is read through the local C(samba.samdb.SamDB); create and
-    delete go through the C(dnsserver) RPC, authenticated with the host's machine
-    account (no credentials are taken as parameters).
+  - Zone existence is read through C(samba.samdb.SamDB) over LDAP; create and
+    delete go through the C(dnsserver) RPC, authenticated and sealed with the same
+    caller credentials.
   - The module is idempotent and supports check mode.
 author:
   - Jonas Mauer (@jomrr)
@@ -114,7 +116,7 @@ import traceback
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_conn
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_zone_logic as logic
@@ -123,9 +125,9 @@ from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_zone_
 class SambaDnsZoneIO:
     """Zone I/O: existence via local LDB, create/delete via the dnsserver RPC.
 
-    The RPC connection (machine account) is opened lazily, only when a write is
-    actually performed - check-mode and idempotent runs touch the LDB only. All
-    samba access goes through the shared lazy-import helpers.
+    The RPC connection (caller credentials) is opened lazily, only when a write
+    is actually performed - check-mode and idempotent runs touch the LDB only.
+    All samba access goes through the shared lazy-import helpers.
     """
 
     def __init__(self, module, samdb):
@@ -136,7 +138,7 @@ class SambaDnsZoneIO:
 
     def _rpc(self):
         if self._conn is None:
-            self._conn, self._server = samba_dns_conn.connect_dnsserver(self.module, self.samdb)
+            self._conn, self._server = samba_dns_conn.connect_dnsserver(self.module)
         return self._conn
 
     def zone_exists(self, name):
@@ -159,6 +161,7 @@ def main():
         replication=dict(type="str", default="domain", choices=logic.REPLICATION_CHOICES),
         state=dict(type="str", default="present", choices=["present", "absent"]),
     )
+    argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)

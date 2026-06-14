@@ -10,6 +10,8 @@ DOCUMENTATION = r"""
 module: samba_user
 short_description: Manage users in a Samba AD DC
 version_added: 0.1.0
+extends_documentation_fragment:
+  - jomrr.samba.connection
 description:
   - Create, modify and remove user accounts in a Samba Active Directory Domain
     Controller.
@@ -203,7 +205,7 @@ import traceback
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
 
@@ -380,6 +382,7 @@ def main():
         path=dict(type="str"),
         state=dict(type="str", default="present", choices=["present", "absent"]),
     )
+    argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)

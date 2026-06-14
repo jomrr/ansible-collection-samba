@@ -17,6 +17,14 @@
   gather_facts: false
   vars:
     _password: "{{ samba_admin_password }}"
+  module_defaults:
+    # All jomrr.samba modules connect with the admin credentials via GSSAPI
+    # sign+seal LDAP; set once here instead of on every task.
+    group/jomrr.samba.all:
+      server: "{{ samba_fqdn }}"
+      bind_username: Administrator
+      bind_password: "{{ samba_admin_password }}"
+      realm: "{{ samba_realm }}"
   tasks:
     - name: Converge | Create a user with the common attributes
       jomrr.samba.samba_user:

@@ -158,3 +158,23 @@ not systemd).
 - The idempotence step (a second converge run yielding `changed: false`) is the
   check that the unit mocks cannot make; `verify.yml` then asserts the resulting
   state through the `*_info` modules.
+
+---
+
+## Connection Model
+
+Every module connects to the DC with explicit caller credentials
+(`server`/`username`/`password`/`realm`) over LDAP using SASL/GSSAPI with signing
+and sealing on port 389 — the GSSAPI layer encrypts the traffic, so no LDAPS or
+StartTLS is involved. Kerberos is required (`MUST_USE_KERBEROS`, so the bind
+fails rather than downgrading to NTLM), sealing is forced
+(`client ldap sasl wrapping = seal`, so it fails rather than downgrading to an
+unencrypted bind), and the ticket obtained from username/password is held in an
+in-memory credential cache (`MEMORY:`) that never touches disk and dies with the
+process. Zone create/delete additionally use the `dnsserver` RPC, authenticated
+and sealed with the same credentials. The earlier credential-free local paths
+(`system_session` against `sam.ldb`, and machine-account RPC) are abandoned: the
+deliberate trade-off is that every call now needs reachable LDAP and valid
+credentials, in exchange for the DC authorizing each operation against the
+authenticated principal (least privilege and an audit trail) instead of an
+implicit local-root bypass.

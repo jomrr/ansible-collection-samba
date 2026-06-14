@@ -4,22 +4,16 @@
 """DNS management RPC connection and zone operations for samba_dns_zone.
 
 Zone create/delete go through the C(dnsserver) RPC (C(DnssrvOperation2)) - unlike
-DNS records, which use the local LDB. This was verified against samba 4.23.8:
-there is no clean LDB zone-create (provision's are bespoke), and the RPC
-C(ZoneCreate)/C(DeleteZoneFromDs) do the full, correct setup server-side.
-
-The RPC is authenticated with the DC's own machine account (read from
-secrets.ldb, available locally), so no credential is taken as a module parameter.
-All ``samba`` imports are lazy (via importlib inside the functions), so importing
-this module never requires the bindings and the static sanity phase stays green.
+DNS records, which use the local LDB. The RPC is authenticated with the same
+explicit caller credentials as the LDAP connection (GSSAPI, in-memory ccache;
+the machine-account path is gone) and is sealed. All ``samba`` imports are lazy.
 """
 
 from __future__ import annotations
 
 import importlib
-import traceback
 
-from ansible.module_utils.basic import missing_required_lib
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_conn
 
 
 def _load(name):
@@ -27,30 +21,25 @@ def _load(name):
     return importlib.import_module(name)
 
 
-def connect_dnsserver(module, samdb):
-    """Open a machine-account dnsserver RPC connection.
+def connect_dnsserver(module):
+    """Open a sealed dnsserver RPC connection with the caller's GSSAPI credentials.
 
-    Returns ``(conn, server)`` where ``server`` is the local DC's DNS host name
-    (needed as the server argument of the RPC operations). Fails the module
-    cleanly if the bindings are missing or the RPC server is unreachable.
+    Returns ``(conn, server)``. Fails the module cleanly (without echoing any
+    credential) if the RPC server is unreachable.
     """
-    try:
-        dnsserver = _load("samba.dcerpc.dnsserver")
-        param = _load("samba.param")
-        credentials = _load("samba.credentials")
-    except ImportError:
-        module.fail_json(msg=missing_required_lib("samba"), exception=traceback.format_exc())
-
+    dnsserver = _load("samba.dcerpc.dnsserver")
+    param = _load("samba.param")
     load_parm = param.LoadParm()
     load_parm.load_default()
-    creds = credentials.Credentials()
-    creds.guess(load_parm)
-    creds.set_machine_account(load_parm)
-    server = samdb.host_dns_name()
+    creds = samba_conn.build_credentials(module)
+    server = module.params["server"]
     try:
-        conn = dnsserver.dnsserver("ncacn_ip_tcp:%s[sign]" % server, load_parm, creds)
-    except RuntimeError as exc:
-        module.fail_json(msg="could not connect to the DNS RPC server '%s': %s" % (server, exc))
+        conn = dnsserver.dnsserver("ncacn_ip_tcp:%s[seal]" % server, load_parm, creds)
+    except RuntimeError:
+        module.fail_json(
+            msg="could not connect to the DNS RPC server at '%s'; verify the "
+                "server, credentials and realm" % server
+        )
     return conn, server
 
 

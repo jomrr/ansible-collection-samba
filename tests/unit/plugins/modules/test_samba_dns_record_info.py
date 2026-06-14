@@ -111,7 +111,11 @@ def _run_main(monkeypatch, check_mode):
     )
     monkeypatch.setattr(info, "connect_samdb", lambda module: object())
     monkeypatch.setattr(basic.AnsibleModule, "exit_json", _exit_json)
-    with patch_module_args({"zone": "example.com", "name": "www", "_ansible_check_mode": check_mode}):
+    args = {
+        "server": "dc.example.com", "bind_username": "Administrator", "bind_password": "secret",
+        "zone": "example.com", "name": "www", "_ansible_check_mode": check_mode,
+    }
+    with patch_module_args(args):
         with pytest.raises(AnsibleExitJson) as raised:
             info.main()
     return raised.value.args[0]

@@ -4,6 +4,12 @@
 - name: Verify
   hosts: all
   gather_facts: false
+  module_defaults:
+    group/jomrr.samba.all:
+      server: "{{ samba_fqdn }}"
+      bind_username: Administrator
+      bind_password: "{{ samba_admin_password }}"
+      realm: "{{ samba_realm }}"
   tasks:
     - name: Verify | Read the created user
       jomrr.samba.samba_user_info:
@@ -288,3 +294,29 @@
           - "'2.0.192.in-addr.arpa' in _zonelist.stdout"
           - "'zforest.example.com' in _zonelist.stdout"
           - "'zdelete.example.com' not in _zonelist.stdout"
+
+    # The GSSAPI ticket lives in a MEMORY ccache and never on disk. Clear any
+    # stray cache, run a module (which performs a GSSAPI bind), then assert no
+    # krb5 credential cache file was left behind.
+    - name: Verify | Clear any stray Kerberos credential caches
+      ansible.builtin.command:
+        cmd: find /tmp /run /var/tmp -name 'krb5cc*' -delete
+      changed_when: false
+
+    - name: Verify | Perform a module GSSAPI bind
+      jomrr.samba.samba_user_info:
+        username: jane
+      register: _leak_probe
+
+    - name: Verify | No Kerberos credential cache was written to disk
+      ansible.builtin.find:
+        paths: [/tmp, /run, /var/tmp]
+        patterns: "krb5cc*"
+        recurse: true
+      register: _ccache_files
+
+    - name: Verify | Assert the ticket stayed in memory (no on-disk ccache)
+      ansible.builtin.assert:
+        that:
+          - _leak_probe.users | length == 1
+          - _ccache_files.files | length == 0

@@ -10,6 +10,8 @@ DOCUMENTATION = r"""
 module: samba_dns_record_info
 short_description: Query DNS records from a Samba AD DC
 version_added: 0.1.0
+extends_documentation_fragment:
+  - jomrr.samba.connection
 description:
   - Read DNS records (A, AAAA, CNAME, PTR, MX, TXT, SRV, NS) from a Samba Active
     Directory Domain Controller's internal DNS.
@@ -135,7 +137,7 @@ import traceback
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
 
@@ -193,6 +195,7 @@ def main():
         name=dict(type="str"),
         type=dict(type="str", choices=logic.TYPE_CHOICES),
     )
+    argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)

@@ -168,7 +168,7 @@ def _run_main(monkeypatch, check_mode):
         lambda module: FakeSamDB(result=[ou_msg("OU=Staff,DC=example,DC=com", description="All staff")]),
     )
     monkeypatch.setattr(basic.AnsibleModule, "exit_json", _exit_json)
-    with patch_module_args({"_ansible_check_mode": check_mode}):
+    with patch_module_args({"server": "dc.example.com", "bind_username": "Administrator", "bind_password": "secret", "_ansible_check_mode": check_mode}):
         with pytest.raises(AnsibleExitJson) as raised:
             samba_ou_info.main()
     return raised.value.args[0]

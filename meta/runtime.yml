@@ -1,2 +1,15 @@
 ---
 requires_ansible: ">=2.19.0"
+action_groups:
+  # All modules share the connection options, so callers can set them once via
+  # module_defaults (group/jomrr.samba.all).
+  all:
+    - samba_user
+    - samba_user_info
+    - samba_group
+    - samba_group_info
+    - samba_ou
+    - samba_ou_info
+    - samba_dns_record
+    - samba_dns_record_info
+    - samba_dns_zone

@@ -17,7 +17,25 @@
       # provides the winbindd the AD DC daemon also launches.
       Suse: [samba-ad-dc, samba-tool, samba-dsdb-modules, samba-client, samba-python3, python313-cryptography, krb5-client, krb5-server, samba-winbind]
     samba_fqdn: "{{ inventory_hostname }}.{{ samba_realm | lower }}"
+  module_defaults:
+    group/jomrr.samba.all:
+      server: "{{ samba_fqdn }}"
+      bind_username: Administrator
+      bind_password: "{{ samba_admin_password }}"
+      realm: "{{ samba_realm }}"
   tasks:
+    - name: Prepare | Drop the host resolv.conf, keep only the container runtime DNS
+      # podman copies the host's /etc/resolv.conf into the container (its
+      # nameservers and search domain). The host's resolvers do not serve the AD
+      # realm, and its config must not leak into the test container, so reduce
+      # resolv.conf to the runtime's own link-local forwarder (e.g. pasta's
+      # 169.254.x), which still reaches the package repositories. After the DC is
+      # up this is replaced by the local samba DNS. Runs via raw before python3.
+      ansible.builtin.raw: >-
+        /bin/sh -c 'fwd=$(grep -oE "^nameserver 169\.254\.[0-9.]+" /etc/resolv.conf | head -1);
+        if [ -n "$fwd" ]; then printf "%s\n" "$fwd" > /etc/resolv.conf; fi'
+      changed_when: false
+
     - name: Prepare | Bootstrap python3 (stock base images ship none)
       # The podman connection shlex-splits and execs argv directly (no shell),
       # so shell logic must run via an explicit /bin/sh -c.
@@ -131,6 +149,18 @@
       retries: 30
       delay: 2
       changed_when: false
+
+    - name: Prepare | Point the resolver at the local samba DNS
+      # Now that the DC (and its internal DNS) is up, use it as the only resolver:
+      # authoritative for the AD realm so GSSAPI/Kerberos can locate the KDC, and
+      # forwarding external names via samba's dns forwarder. No host DNS config
+      # remains in the container. /etc/resolv.conf is a podman bind-mount, so it
+      # is truncated in place (no atomic rename).
+      ansible.builtin.copy:
+        content: "nameserver 127.0.0.1\n"
+        dest: /etc/resolv.conf
+        mode: "0644"
+        unsafe_writes: true
 
     - name: Prepare | Wait until the DNS management RPC is serving
       # samba-tool dns talks to the dnsserver RPC over ncacn_ip_tcp. The modules

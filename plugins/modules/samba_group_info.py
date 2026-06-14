@@ -10,6 +10,8 @@ DOCUMENTATION = r"""
 module: samba_group_info
 short_description: Query groups from a Samba AD DC
 version_added: 0.1.0
+extends_documentation_fragment:
+  - jomrr.samba.connection
 description:
   - Read groups from a Samba Active Directory Domain Controller.
   - Talks to the directory through the native C(samba) Python bindings
@@ -100,7 +102,7 @@ import traceback
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
@@ -134,6 +136,7 @@ def main():
     argument_spec = dict(
         name=dict(type="str", aliases=["samaccountname"]),
     )
+    argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
