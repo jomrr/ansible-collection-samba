@@ -1,0 +1,64 @@
+---
+# Integration scenario for samba_provision, ISOLATED from the default scenario
+# (separate container names, separate run) so a bug in this module cannot take
+# the object-module suite down with it.
+#
+# The crucial difference from the default scenario: prepare.yml installs the
+# packages and sets up the environment but does NOT provision the DC. The
+# container stays un-provisioned, so samba_provision itself does the
+# provisioning in converge, and molecule's idempotence run proves the no-op.
+#
+# Platform names are kept short so the derived NetBIOS name stays within the
+# 15-character limit (e.g. "prov-opensuse" -> "PROV-OPENSUSE").
+#
+# All four distros are covered on purpose: provisioning is the most
+# distro-sensitive step (packaging and KDC differences), which is exactly what
+# this scenario must exercise. The runtime cost is four provisions; note that
+# this scenario is lighter per distro than default (no daemon, no readiness
+# gates, no object seeding).
+
+driver:
+  name: podman
+
+platforms:
+  - name: prov-debian
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: prov-fedora
+    image: docker.io/fedora:latest
+    pre_build_image: true
+    privileged: true
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: prov-opensuse
+    image: docker.io/opensuse/tumbleweed:latest
+    pre_build_image: true
+    privileged: true
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: prov-ubuntu
+    image: docker.io/ubuntu:latest
+    pre_build_image: true
+    privileged: true
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        samba_realm: SAMDOM.EXAMPLE.COM
+        samba_domain: SAMDOM
+        samba_admin_password: "P@ssw0rd-Int3gration"
+        samba_fqdn: "{{ inventory_hostname }}.{{ samba_realm | lower }}"
+  playbooks:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+
+verifier:
+  name: ansible

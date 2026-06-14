@@ -1,0 +1,220 @@
+---
+# Verify samba_provision produced a real, functional DC. Two levels:
+#   Level 1 (structural, daemon-less): open the local sam.ldb and assert real AD
+#     content - not just that the file exists (a half-failed provision could
+#     leave a file behind). This mirrors what the module's read_state does, but
+#     asserts the CONTENTS.
+#   Level 2 (live interop): start the Samba daemon and exercise real object
+#     management against the running DC with samba-tool - create and read back a
+#     user, a group and a membership. This proves the DC can be administered, not
+#     merely that a process is alive.
+# The existing idempotency and check-mode assertions run in between, while the
+# host is still daemon-less, so the daemon start is cleanly separated: a Level 1
+# failure means the structure is broken, a Level 2 failure means the live DC
+# cannot manage objects.
+#
+# Level 2 uses samba-tool operations that take NO host argument (user list/create,
+# group add/list/addmembers/listmembers): those run against the local DC and are
+# portable across the distro builds, unlike samba-tool subcommands that take a
+# <host> (some builds reject a loopback host). The collection's own GSSAPI _info
+# modules would additionally need a local resolver (resolv.conf), which this
+# isolated scenario deliberately does not set up - so samba-tool carries the
+# interop and Level 1 carries the content proof.
+- name: Verify
+  hosts: all
+  gather_facts: false
+  vars:
+    _test_user: provtest
+    _test_group: provgroup
+    # A throwaway test password that meets the AD complexity policy.
+    _test_password: "T3st-Interop-Pw1!"
+  tasks:
+    # --- Level 1: structural, no daemon ---
+    - name: Verify | Drop a structural check script (local sam.ldb open)
+      ansible.builtin.copy:
+        dest: /root/verify_struct.py
+        mode: "0644"
+        content: |
+          import sys
+          import ldb
+          from samba.samdb import SamDB
+          from samba.auth import system_session
+          from samba.param import LoadParm
+
+          expected_realm = sys.argv[1].lower()
+
+          lp = LoadParm()
+          lp.load_default()
+          samdb = SamDB(url=lp.private_path("sam.ldb"), session_info=system_session(), lp=lp)
+
+          domaindn = samdb.domain_dn()
+          sid = str(samdb.get_domain_sid())
+          dnsdomain = ".".join(c.split("=", 1)[1] for c in domaindn.split(",")).lower()
+
+          admin = samdb.search(base=domaindn, scope=ldb.SCOPE_SUBTREE,
+                               expression="(sAMAccountName=Administrator)", attrs=["objectSid"])
+          users = samdb.search(base=domaindn, scope=ldb.SCOPE_SUBTREE,
+                               expression="(cn=Users)", attrs=["cn"])
+          yp = samdb.search(base=domaindn, scope=ldb.SCOPE_SUBTREE,
+                            expression="(cn=ypServ30)", attrs=["cn"])
+
+          assert dnsdomain == expected_realm, "realm mismatch: %s != %s" % (dnsdomain, expected_realm)
+          assert sid.startswith("S-1-5-21-"), "domain SID implausible: %s" % sid
+          assert len(admin) == 1, "Administrator user missing"
+          assert len(users) >= 1, "CN=Users container missing"
+          assert len(yp) == 1, "ypServ30 RFC2307 indicator missing"
+
+          print("STRUCT_OK %s %s" % (domaindn, sid))
+
+    - name: Verify | Open the local sam.ldb and assert real AD content (no daemon)
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /root/verify_struct.py
+          - "{{ samba_realm }}"
+      changed_when: false
+      register: _struct
+
+    - name: Verify | The structural check confirmed a real provisioned domain
+      ansible.builtin.assert:
+        that:
+          - "'STRUCT_OK' in _struct.stdout"
+
+    # --- idempotency and check mode (still daemon-less) ---
+    - name: Verify | A second samba_provision run is an idempotent no-op
+      jomrr.samba.samba_provision:
+        realm: "{{ samba_realm }}"
+        domain: "{{ samba_domain }}"
+        admin_password: "{{ samba_admin_password }}"
+        dns_backend: SAMBA_INTERNAL
+        use_rfc2307: true
+        state: present
+      register: _again
+
+    - name: Verify | The repeat run changed nothing and reports the provisioned domain
+      ansible.builtin.assert:
+        that:
+          - _again is not changed
+          - _again.provisioned is true
+          - _again.domain.domaindn | length > 0
+
+    - name: Verify | samba_provision in check mode on a provisioned host is a no-op
+      # No admin_password is needed for an already-provisioned host: the state is
+      # read from the local sam.ldb before any password is required.
+      jomrr.samba.samba_provision:
+        realm: "{{ samba_realm }}"
+        domain: "{{ samba_domain }}"
+        state: present
+      check_mode: true
+      register: _check
+
+    - name: Verify | Check mode reports no change on the provisioned host
+      ansible.builtin.assert:
+        that:
+          - _check is not changed
+          - _check.provisioned is true
+
+    # --- Level 2: live interop against the running DC ---
+    - name: Verify | Install the generated krb5.conf before starting the daemon
+      # The DC daemon's KDC child needs /etc/krb5.conf at startup; without it the
+      # KDC fails and samba_terminate takes the whole daemon down (most visibly on
+      # the RedHat/SUSE builds). The default scenario installs it before starting
+      # the daemon too. This is the one daemon-startup prerequisite the otherwise
+      # daemon-less prepare omits.
+      ansible.builtin.copy:
+        src: /var/lib/samba/private/krb5.conf
+        dest: /etc/krb5.conf
+        remote_src: true
+        mode: "0644"
+
+    - name: Verify | Start the Samba AD DC daemon
+      ansible.builtin.command:
+        cmd: samba --daemon
+      changed_when: true
+
+    - name: Verify | Wait until the live DC answers a functional query
+      # samba-tool user list runs against the local DC with no host argument, so
+      # it is portable; retrying it is the readiness gate.
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - user
+          - list
+      register: _ready
+      until: _ready.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: Verify | Create a user through samba-tool (write path)
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - user
+          - create
+          - "{{ _test_user }}"
+          - "{{ _test_password }}"
+      changed_when: true
+      no_log: true
+
+    - name: Verify | List users and read the created user back (read path)
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - user
+          - list
+      register: _users
+      changed_when: false
+
+    - name: Verify | The created user appears in the listing
+      ansible.builtin.assert:
+        that:
+          - _test_user in _users.stdout
+
+    - name: Verify | Create a group through samba-tool
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - group
+          - add
+          - "{{ _test_group }}"
+      changed_when: true
+
+    - name: Verify | List groups and read the created group back
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - group
+          - list
+      register: _groups
+      changed_when: false
+
+    - name: Verify | The created group appears in the listing
+      ansible.builtin.assert:
+        that:
+          - _test_group in _groups.stdout
+
+    - name: Verify | Add the user to the group
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - group
+          - addmembers
+          - "{{ _test_group }}"
+          - "{{ _test_user }}"
+      changed_when: true
+
+    - name: Verify | List the group members and read the membership back
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - group
+          - listmembers
+          - "{{ _test_group }}"
+      register: _members
+      changed_when: false
+
+    - name: Verify | The user is a member of the group
+      ansible.builtin.assert:
+        that:
+          - _test_user in _members.stdout

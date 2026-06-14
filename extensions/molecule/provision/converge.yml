@@ -1,0 +1,18 @@
+---
+# Provision the un-provisioned host with samba_provision. Molecule's idempotence
+# step re-runs this whole playbook and asserts the second run reports no changes
+# (the core binary-idempotency check); verify.yml adds the provisioned-effect
+# and check-mode assertions. The parameters match what the default scenario
+# otherwise provisions by hand (realm/domain, SAMBA_INTERNAL DNS, RFC2307).
+- name: Converge
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Converge | Provision the Samba AD domain controller
+      jomrr.samba.samba_provision:
+        realm: "{{ samba_realm }}"
+        domain: "{{ samba_domain }}"
+        admin_password: "{{ samba_admin_password }}"
+        dns_backend: SAMBA_INTERNAL
+        use_rfc2307: true
+        state: present

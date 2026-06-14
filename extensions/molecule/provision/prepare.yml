@@ -1,0 +1,85 @@
+---
+# Prepare an UN-provisioned Samba host for the samba_provision scenario: install
+# the packages and set up the environment (idmap range so provisioning fits the
+# rootless user namespace, /etc/hosts FQDN, stock smb.conf removed), but do NOT
+# run domain provisioning — that is samba_provision's job in converge. This is
+# the package/environment subset of the default scenario's prepare.yml, minus
+# the provision, krb5.conf, daemon, readiness-gate and seeding steps.
+- name: Prepare un-provisioned Samba host
+  hosts: all
+  gather_facts: false
+  vars:
+    _samba_packages:
+      Debian: [samba, samba-ad-dc, samba-ad-provision, samba-dsdb-modules, samba-vfs-modules, smbclient, winbind, python3-samba, ldb-tools, procps]
+      RedHat: [samba-dc, samba-common-tools, python3-samba, krb5-workstation, procps-ng]
+      Suse: [samba-ad-dc, samba-tool, samba-dsdb-modules, samba-client, samba-python3, python313-cryptography, krb5-client, krb5-server, samba-winbind]
+    samba_fqdn: "{{ inventory_hostname }}.{{ samba_realm | lower }}"
+  tasks:
+    - name: Prepare | Drop the host resolv.conf, keep only the container runtime DNS
+      # Reduce resolv.conf to the runtime's own link-local forwarder so package
+      # repos stay reachable without leaking host resolvers. Runs via raw before
+      # python3 is present.
+      ansible.builtin.raw: >-
+        /bin/sh -c 'fwd=$(grep -oE "^nameserver 169\.254\.[0-9.]+" /etc/resolv.conf | head -1);
+        if [ -n "$fwd" ]; then printf "%s\n" "$fwd" > /etc/resolv.conf; fi'
+      changed_when: false
+
+    - name: Prepare | Bootstrap python3 (stock base images ship none)
+      ansible.builtin.raw: >-
+        /bin/sh -c 'if command -v apt-get >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive;
+        apt-get update -qq && apt-get install -y -qq python3;
+        elif command -v dnf >/dev/null 2>&1; then dnf install -y -q python3;
+        elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive --gpg-auto-import-keys install -y python3; fi'
+      changed_when: false
+
+    - name: Prepare | Gather facts now that python3 is present
+      ansible.builtin.setup:
+
+    - name: Prepare | Refresh apt cache (Debian family)
+      ansible.builtin.apt:
+        update_cache: true
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Prepare | Refresh zypper cache (Suse family)
+      ansible.builtin.command:
+        cmd: zypper --non-interactive --gpg-auto-import-keys refresh
+      changed_when: false
+      when: ansible_facts['os_family'] == "Suse"
+
+    - name: Prepare | Install Samba AD DC packages
+      ansible.builtin.package:
+        name: "{{ _samba_packages[ansible_facts['os_family']] }}"
+        state: present
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Prepare | Ensure the FQDN resolves to loopback
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "127.0.0.1 {{ samba_fqdn }} {{ inventory_hostname }}"
+        regexp: " {{ samba_fqdn }} "
+        state: present
+        # /etc/hosts is a podman bind-mount; atomic rename is not possible.
+        unsafe_writes: true
+
+    - name: Prepare | Remove the stock smb.conf so samba_provision starts clean
+      ansible.builtin.file:
+        path: /etc/samba/smb.conf
+        state: absent
+
+    - name: Prepare | Constrain idmap xid range to fit the rootless user namespace
+      # The default s4 idmap range (3,000,000-4,000,000) lies outside the rootless
+      # podman subordinate-id map (~65536 ids), so the sysvol chown during
+      # provisioning hits an unmappable xid and Samba panics. Low xids keep the
+      # chown inside the namespace. Test-fixture edit only.
+      ansible.builtin.replace:
+        path: /usr/share/samba/setup/idmap_init.ldif
+        regexp: "{{ item.regexp }}"
+        replace: "{{ item.replace }}"
+      loop:
+        - {regexp: '^lowerBound: .*', replace: 'lowerBound: 10000'}
+        - {regexp: '^upperBound: .*', replace: 'upperBound: 60000'}
+      loop_control:
+        label: "{{ item.replace }}"

@@ -22,12 +22,20 @@ jobs:
     uses: ./.github/workflows/test.yml
 
   molecule:
-    name: Molecule (integration, four-distro matrix)
+    name: Molecule (${{ matrix.scenario }}, four-distro matrix)
     needs: test
     # Branch pushes to main and tag pushes (v*) are both event_name 'push';
     # pull_request events are not, so Molecule is skipped on PRs.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # default = the object-module suite; provision = the samba_provision
+      # scenario. Separate matrix jobs so a failure is unambiguously attributable.
+      matrix:
+        scenario:
+          - default
+          - provision
     env:
       # Resolve both the collection under test (checked out below) and the
       # containers.podman collection the Molecule podman driver needs, from one
@@ -69,6 +77,6 @@ jobs:
           ansible-galaxy collection install containers.podman
           -p "${{ github.workspace }}"
 
-      - name: Run Molecule (all four distros)
-        run: molecule test
+      - name: Run Molecule (${{ matrix.scenario }}, all four distros)
+        run: molecule test -s ${{ matrix.scenario }}
         working-directory: ${{ env.COLLECTION_PATH }}

@@ -14,7 +14,7 @@ COLLECTIONS_ROOT := $(CURDIR)/../../..
 
 .DEFAULT_GOAL := help
 
-.PHONY: help lint sanity units test molecule build changelog promote release release-dry docs docs-clean clean
+.PHONY: help lint sanity units test molecule molecule-provision build changelog promote release release-dry docs docs-clean clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -33,6 +33,9 @@ test: lint sanity units ## Run the fast gates together (lint + sanity + units)
 
 molecule: ## Run the full Molecule integration suite (four distros; slow)
 	molecule test
+
+molecule-provision: ## Run the samba_provision Molecule scenario (four distros; slow)
+	molecule test -s provision
 
 build: ## Build the collection tarball into dist/ (overwrites existing)
 	ansible-galaxy collection build --output-path dist/ --force
