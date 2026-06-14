@@ -18,14 +18,19 @@ env:
 
 jobs:
   sanity:
-    name: Sanity (ansible-core ${{ matrix.ansible }})
+    name: Sanity (ansible-core ${{ matrix.ansible }}, py${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Python and ansible-core are coupled (devel requires Python >=3.13), so
+      # these are explicit pairs, not crossed axes.
       matrix:
-        ansible:
-          - stable-2.20
-          - devel
+        include:
+          - ansible: stable-2.20
+            python: "3.12"
+          - ansible: devel
+            python: "3.13"
+    # devel is tolerated (early warning, does not block); stable-2.20 is hard.
     continue-on-error: ${{ matrix.ansible == 'devel' }}
     steps:
       - name: Check out the collection
@@ -34,9 +39,9 @@ jobs:
           path: ${{ env.COLLECTION_PATH }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
 
       - name: Install ansible-core (${{ matrix.ansible }})
         run: >-
@@ -44,18 +49,23 @@ jobs:
           https://github.com/ansible/ansible/archive/${{ matrix.ansible }}.tar.gz
 
       - name: Run sanity tests
-        run: ansible-test sanity --docker --python 3.12 -v
+        run: ansible-test sanity --docker --python ${{ matrix.python }} -v
         working-directory: ${{ env.COLLECTION_PATH }}
 
   units:
-    name: Units (ansible-core ${{ matrix.ansible }})
+    name: Units (ansible-core ${{ matrix.ansible }}, py${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Python and ansible-core are coupled (devel requires Python >=3.13), so
+      # these are explicit pairs, not crossed axes.
       matrix:
-        ansible:
-          - stable-2.20
-          - devel
+        include:
+          - ansible: stable-2.20
+            python: "3.12"
+          - ansible: devel
+            python: "3.13"
+    # devel is tolerated (early warning, does not block); stable-2.20 is hard.
     continue-on-error: ${{ matrix.ansible == 'devel' }}
     steps:
       - name: Check out the collection
@@ -64,9 +74,9 @@ jobs:
           path: ${{ env.COLLECTION_PATH }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
 
       - name: Install ansible-core (${{ matrix.ansible }})
         run: >-
@@ -74,7 +84,7 @@ jobs:
           https://github.com/ansible/ansible/archive/${{ matrix.ansible }}.tar.gz
 
       - name: Run unit tests
-        run: ansible-test units --docker --python 3.12 -v
+        run: ansible-test units --docker --python ${{ matrix.python }} -v
         working-directory: ${{ env.COLLECTION_PATH }}
 
   lint:
@@ -87,7 +97,7 @@ jobs:
           path: ${{ env.COLLECTION_PATH }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
