@@ -1,0 +1,168 @@
+---
+# Verify samba_join_sssd produced a real join AND that the full SSSD/RFC2307
+# chain works. Runs on the client hosts.
+#   - join effect + idempotency + check mode (the module's contract);
+#   - adcli testjoin confirms the keytab is valid and the keytab file exists;
+#   - SSSD is brought up (FIXTURE) and then THE CORE PROOF: a user seeded on the
+#     DC with an explicit uidNumber resolves on the client, via SSSD's
+#     id_provider=ad + ldap_id_mapping=false, with EXACTLY that uidNumber
+#     (id / getent passwd) - and the seeded group with its exact gidNumber. That
+#     proves SSSD reads the AD RFC2307 uidNumber instead of mapping its own id.
+#     This is the SSSD counterpart to the join_member winbind proof.
+- name: Verify
+  hosts: client
+  gather_facts: false
+  tasks:
+    # --- the module's contract (no daemon needed) ---
+    - name: Verify | A second samba_join_sssd run is an idempotent no-op
+      jomrr.samba.samba_join_sssd:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        state: present
+      register: _again
+
+    - name: Verify | The repeat run changed nothing and reports a join
+      ansible.builtin.assert:
+        that:
+          - _again is not changed
+          - _again.joined is true
+          - _again.domain.realm == samba_realm
+          - _again.domain.keytab == "/etc/krb5.keytab"
+
+    - name: Verify | samba_join_sssd in check mode on a joined host is a no-op
+      # No bind_password is needed for an already-joined host: the state is read
+      # via adcli testjoin before any password is required.
+      jomrr.samba.samba_join_sssd:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        state: present
+      check_mode: true
+      register: _check
+
+    - name: Verify | Check mode reports no change on the joined host
+      ansible.builtin.assert:
+        that:
+          - _check is not changed
+          - _check.joined is true
+
+    - name: Verify | The Kerberos keytab was written
+      ansible.builtin.stat:
+        path: /etc/krb5.keytab
+      register: _keytab
+
+    - name: Verify | adcli testjoin confirms the machine account is valid
+      ansible.builtin.command:
+        argv:
+          - adcli
+          - testjoin
+          - "--domain={{ samba_realm | lower }}"
+      register: _testjoin
+      changed_when: false
+
+    - name: Verify | The keytab exists and the join is valid (testjoin rc 0)
+      ansible.builtin.assert:
+        that:
+          - _keytab.stat.exists
+          - _testjoin.rc == 0
+
+    # --- SSSD fixture: bring SSSD up so nss_sss can resolve ---
+    - name: Verify | Ensure the SSSD runtime directory exists and is writable
+      # /run/sssd is normally created by systemd-tmpfiles; these daemon-less
+      # containers have no systemd, so create it. Different distros' SSSD write the
+      # /run/sssd/sssd.pid monitor pidfile as different users (root vs the sssd
+      # user, depending on the build's privilege separation); without it the
+      # monitor exits with errno 13 right after the backend goes online. World
+      # writable side-steps the per-distro run-user entirely - acceptable for a
+      # throwaway test container; a real systemd host gets this from tmpfiles.d.
+      ansible.builtin.file:
+        path: /run/sssd
+        state: directory
+        mode: "0777"
+
+    - name: Verify | Clear any stale SSSD cache before start
+      # SSSD caches aggressively; clear it so the first lookup reflects AD.
+      ansible.builtin.command:
+        cmd: sss_cache -E
+      changed_when: false
+      failed_when: false
+
+    - name: Verify | Start the SSSD daemon
+      ansible.builtin.command:
+        cmd: sssd
+      changed_when: true
+
+    - name: Verify | Wait until SSSD resolves the seeded user (getent)
+      # getent passwd is the readiness gate: rc 0 means the user resolved (its rc
+      # tracks only the user lookup, not group-name resolution, unlike `id`). SSSD
+      # brings the AD domain online lazily, so the window is generous.
+      ansible.builtin.command:
+        argv:
+          - getent
+          - passwd
+          - "{{ samba_rfc_user }}"
+      register: _pw
+      until: _pw.rc == 0
+      retries: 40
+      delay: 3
+      changed_when: false
+
+    # --- THE CORE PROOF: RFC2307 uidNumber/gidNumber resolve via SSSD ---
+    - name: Verify | getent passwd reports EXACTLY the AD RFC2307 uidNumber
+      # getent passwd line: name:passwd:UID:GID:... - field 3 is the uid, which
+      # must equal the uidNumber set on the DC (not an SSSD-mapped id).
+      ansible.builtin.assert:
+        that:
+          - _pw.stdout.split(':')[2] == samba_rfc_uid | string
+        success_msg: "SSSD resolved {{ samba_rfc_user }} to uid {{ samba_rfc_uid }} from AD"
+        fail_msg: "expected uid {{ samba_rfc_uid }}, got '{{ _pw.stdout }}'"
+
+    - name: Verify | id reports the same exact uidNumber
+      ansible.builtin.command:
+        argv:
+          - id
+          - "{{ samba_rfc_user }}"
+      register: _id
+      changed_when: false
+
+    - name: Verify | id confirms the AD RFC2307 uidNumber (uid=<N>(name))
+      # The seed user's primary gid is a named group, so `id` resolves cleanly
+      # (rc 0); field "uid=<N>" must be the AD uidNumber.
+      ansible.builtin.assert:
+        that:
+          - _id.stdout.split('(')[0].split('=')[1] == samba_rfc_uid | string
+
+    - name: Verify | Resolve the seeded group through nss/SSSD
+      ansible.builtin.command:
+        argv:
+          - getent
+          - group
+          - "{{ samba_rfc_group }}"
+      register: _gr
+      changed_when: false
+
+    - name: Verify | The group resolves with EXACTLY its AD RFC2307 gidNumber
+      ansible.builtin.assert:
+        that:
+          - _gr.rc == 0
+          - _gr.stdout.split(':')[2] == samba_rfc_gid | string
+        success_msg: "SSSD resolved {{ samba_rfc_group }} to gid {{ samba_rfc_gid }} from AD"
+        fail_msg: "expected gid {{ samba_rfc_gid }}, got '{{ _gr.stdout }}'"
+
+    - name: Verify | sssctl confirms the user comes from the AD provider
+      ansible.builtin.command:
+        argv:
+          - sssctl
+          - user-show
+          - "{{ samba_rfc_user }}"
+      register: _sssctl
+      changed_when: false
+      failed_when: false
+
+    - name: Verify | sssctl user-show found the user (interop cross-check)
+      ansible.builtin.assert:
+        that:
+          - _sssctl.rc == 0
+          - samba_rfc_user in _sssctl.stdout

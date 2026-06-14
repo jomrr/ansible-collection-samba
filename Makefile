@@ -14,7 +14,7 @@ COLLECTIONS_ROOT := $(CURDIR)/../../..
 
 .DEFAULT_GOAL := help
 
-.PHONY: help lint sanity units test molecule molecule-provision molecule-join-dc molecule-join-member build changelog promote release release-dry docs docs-clean clean
+.PHONY: help lint sanity units test molecule molecule-provision molecule-join-dc molecule-join-member molecule-join-sssd build changelog promote release release-dry docs docs-clean clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -42,6 +42,9 @@ molecule-join-dc: ## Run the samba_join_dc multi-host Molecule scenario (four pa
 
 molecule-join-member: ## Run the samba_join_member multi-host Molecule scenario (four pairs; slow)
 	molecule test -s join_member
+
+molecule-join-sssd: ## Run the samba_join_sssd multi-host Molecule scenario (four pairs; slow)
+	molecule test -s join_sssd
 
 build: ## Build the collection tarball into dist/ (overwrites existing)
 	ansible-galaxy collection build --output-path dist/ --force

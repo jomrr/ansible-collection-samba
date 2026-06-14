@@ -1,0 +1,131 @@
+---
+# Multi-host integration scenario for samba_join_sssd, ISOLATED from every other
+# scenario (separate container names, separate run, separate realms) so a bug
+# here cannot take the other suites down.
+#
+# Topology: isolated DC+client PAIRS, one distinct realm per pair, the DC always
+# Debian (the join_member template). Four pairs = eight containers (4 DCs + 4
+# clients):
+#
+#   sdc-deb  (debian, realm DEB.SSSD.EXAMPLE.COM)  <- sc-deb  (debian)
+#   sdc-fed  (debian, realm FED.SSSD.EXAMPLE.COM)  <- sc-fed  (fedora)
+#   sdc-suse (debian, realm SUSE.SSSD.EXAMPLE.COM) <- sc-suse (opensuse)
+#   sdc-ubu  (debian, realm UBU.SSSD.EXAMPLE.COM)  <- sc-ubu  (ubuntu)
+#
+# This is the SSSD counterpart to the join_member scenario: same topology and the
+# same RFC2307 seed, but the joining host enrols with adcli (writing a Kerberos
+# keytab) and resolves identities through SSSD instead of winbind.
+#
+# The core proof: a user seeded on the DC with an explicit RFC2307 uidNumber must
+# resolve on the client, through SSSD's id_provider=ad with ldap_id_mapping=false,
+# with EXACTLY that uidNumber (id / getent passwd) - proving SSSD reads the AD
+# RFC2307 uidNumber, not a self-mapped id. The sssd.conf/nsswitch/SSSD-daemon
+# configuration is a scenario FIXTURE (never the module's job); it is the prototype
+# for the later SSSD client role, the counterpart to the idmap_ad smb.conf the
+# join_member scenario documents.
+#
+# Names are short and collision-free vs the other scenarios so any derived short
+# name stays within the 15-character limit.
+
+driver:
+  name: podman
+
+platforms:
+  # --- pair: debian ---
+  - name: sdc-deb
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-sssd
+    groups: [dc]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: sc-deb
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-sssd
+    groups: [client]
+  # --- pair: fedora ---
+  - name: sdc-fed
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-sssd
+    groups: [dc]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: sc-fed
+    image: docker.io/fedora:latest
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-sssd
+    groups: [client]
+  # --- pair: opensuse ---
+  - name: sdc-suse
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-sssd
+    groups: [dc]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: sc-suse
+    image: docker.io/opensuse/tumbleweed:latest
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-sssd
+    groups: [client]
+  # --- pair: ubuntu ---
+  - name: sdc-ubu
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-sssd
+    groups: [dc]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: sc-ubu
+    image: docker.io/ubuntu:latest
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-sssd
+    groups: [client]
+
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        # The DC admin password each DC is provisioned with and each client binds
+        # with; meets the AD complexity policy.
+        samba_admin_password: "P@ssw0rd-Int3gration"
+        # Each host's own fully-qualified name in its pair's realm.
+        samba_fqdn: "{{ inventory_hostname }}.{{ samba_realm | lower }}"
+        # The RFC2307-seeded objects and their FIXED unix ids the client must
+        # resolve to EXACTLY through SSSD (the core proof).
+        samba_rfc_user: rfcuser
+        samba_rfc_uid: 10042
+        # The seed user's primary gid is the seeded group's gidNumber on purpose,
+        # so the primary group resolves to a NAME (rfcgroup) and `id` returns rc 0;
+        # an unnamed primary gid makes GNU id exit non-zero even on success.
+        samba_rfc_user_gid: 10001
+        samba_rfc_group: rfcgroup
+        samba_rfc_gid: 10001
+    host_vars:
+      # Each pair shares a realm; the client additionally points at its DC.
+      sdc-deb: {samba_realm: DEB.SSSD.EXAMPLE.COM, samba_domain: DEB}
+      sc-deb: {samba_realm: DEB.SSSD.EXAMPLE.COM, samba_domain: DEB, target_dc: sdc-deb}
+      sdc-fed: {samba_realm: FED.SSSD.EXAMPLE.COM, samba_domain: FED}
+      sc-fed: {samba_realm: FED.SSSD.EXAMPLE.COM, samba_domain: FED, target_dc: sdc-fed}
+      sdc-suse: {samba_realm: SUSE.SSSD.EXAMPLE.COM, samba_domain: SUSE}
+      sc-suse: {samba_realm: SUSE.SSSD.EXAMPLE.COM, samba_domain: SUSE, target_dc: sdc-suse}
+      sdc-ubu: {samba_realm: UBU.SSSD.EXAMPLE.COM, samba_domain: UBU}
+      sc-ubu: {samba_realm: UBU.SSSD.EXAMPLE.COM, samba_domain: UBU, target_dc: sdc-ubu}
+  playbooks:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+
+verifier:
+  name: ansible

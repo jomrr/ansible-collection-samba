@@ -1,0 +1,23 @@
+---
+# Join each client to its pair's existing DC with samba_join_sssd (adcli ->
+# keytab). Runs ONLY on the client hosts; the DC hosts were set up in prepare.
+#
+# server is set explicitly on purpose: adcli authenticates to the DC's LDAP SPN
+# (ldap/<dc-fqdn>), and letting it discover the DC by the bare domain name finds
+# no such SPN in this isolated setup ("Server not found in Kerberos database").
+# Passing the DC FQDN as --domain-controller makes the join deterministic.
+#
+# Molecule's idempotence step re-runs this and asserts the second run reports no
+# changes (an existing valid join is a no-op via adcli testjoin); verify.yml adds
+# the joined-effect, check-mode and the RFC2307 `id` assertions.
+- name: Converge
+  hosts: client
+  gather_facts: false
+  tasks:
+    - name: Converge | Join the host to its domain via adcli for SSSD
+      jomrr.samba.samba_join_sssd:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        state: present
