@@ -44,6 +44,9 @@ options:
       - If omitted, records of all managed types are returned.
     type: str
     choices: [A, AAAA, CNAME, PTR, MX, NS, SRV, TXT]
+seealso:
+  - module: jomrr.samba.samba_dns_record
+    description: Manage DNS records in a Samba AD DC.
 notes:
   - This module must be executed on a Samba AD DC where the C(samba) Python
     bindings and the directory are available.

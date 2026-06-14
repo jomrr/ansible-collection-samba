@@ -54,6 +54,9 @@ options:
     choices:
       - present
       - absent
+seealso:
+  - module: jomrr.samba.samba_ou_info
+    description: Query organizational units from a Samba AD DC.
 notes:
   - This module must be executed on a Samba AD DC where the C(samba) Python
     bindings and the directory are available.

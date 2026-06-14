@@ -58,6 +58,11 @@ options:
     choices:
       - present
       - absent
+seealso:
+  - module: jomrr.samba.samba_dns_zone_info
+    description: Query DNS zones from a Samba AD DC.
+  - module: jomrr.samba.samba_dns_record
+    description: Manage the records inside a DNS zone.
 notes:
   - This module must be executed on a Samba AD DC where the C(samba) Python
     bindings, the directory and the DNS RPC server are available.

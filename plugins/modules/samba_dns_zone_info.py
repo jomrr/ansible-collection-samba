@@ -35,6 +35,9 @@ options:
         C(example.com) or C(2.0.192.in-addr.arpa).
       - If omitted, all DNS zones are returned.
     type: str
+seealso:
+  - module: jomrr.samba.samba_dns_zone
+    description: Manage DNS zones in a Samba AD DC.
 notes:
   - This module must be executed on a Samba AD DC where the C(samba) Python
     bindings and the directory are available.

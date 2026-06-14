@@ -38,6 +38,9 @@ options:
       - Without O(name), it is the root of the subtree that is listed.
       - If omitted, the domain root is used.
     type: str
+seealso:
+  - module: jomrr.samba.samba_ou
+    description: Manage organizational units in a Samba AD DC.
 notes:
   - This module must be executed on a Samba AD DC where the C(samba) Python
     bindings and the directory are available.

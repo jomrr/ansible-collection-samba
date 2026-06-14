@@ -95,6 +95,9 @@ options:
     choices:
       - present
       - absent
+seealso:
+  - module: jomrr.samba.samba_group_info
+    description: Query groups from a Samba AD DC.
 notes:
   - This module must be executed on a Samba AD DC where the C(samba) Python
     bindings and the directory are available.

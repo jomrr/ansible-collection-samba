@@ -30,6 +30,9 @@ options:
     type: str
     aliases:
       - samaccountname
+seealso:
+  - module: jomrr.samba.samba_group
+    description: Manage groups in a Samba AD DC.
 notes:
   - This module must be executed on a Samba AD DC where the C(samba) Python
     bindings and the directory are available.

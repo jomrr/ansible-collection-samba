@@ -17,6 +17,8 @@ tags:
   - infrastructure
   - security
 repository: https://github.com/jomrr/ansible-collection-samba
+documentation: https://github.com/jomrr/ansible-collection-samba#readme
+homepage: https://github.com/jomrr/ansible-collection-samba
 issues: https://github.com/jomrr/ansible-collection-samba/issues
 build_ignore:
   - extensions/molecule
