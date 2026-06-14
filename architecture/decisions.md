@@ -178,3 +178,107 @@ deliberate trade-off is that every call now needs reachable LDAP and valid
 credentials, in exchange for the DC authorizing each operation against the
 authenticated principal (least privilege and an audit trail) instead of an
 implicit local-root bypass.
+
+---
+
+## samba_provision (setup module)
+
+### Context
+
+A new module, `samba_provision`, performs the first-time provisioning of a Samba
+AD DC. This is fundamentally different from the object modules (`samba_user`,
+`samba_group`, `samba_ou`, `samba_dns_*`): it creates the domain itself, before
+any DC exists to connect to. Per the ADR policy in CLAUDE.md, the
+`samba.provision` bindings API was verified (against samba 4.23.8) and this
+decision proposed to the maintainer before any module code is written.
+
+### Decision
+
+`samba_provision` is a *setup* module, not an object module, and deliberately
+departs from several collection conventions:
+
+- **No connection doc_fragment, not in the `jomrr.samba.all` action group.**
+  There is no DC to connect to during provisioning, so the GSSAPI `ldap://`
+  connection layer (`server`/`bind_username`/`bind_password`/`realm`) does not
+  apply. The module acts on the local machine that is becoming the DC.
+- **Local-only, mandatory.** Unlike the object modules (fully remote-capable
+  over `ldap://`), `samba_provision` must run on the future DC itself
+  (`hosts: <dc>` / `delegate_to`). It calls `samba.provision.provision()`
+  locally and opens the local `sam.ldb` directly.
+- **`state` present only.** No `absent` — destroying a domain is intentionally
+  not offered. Only provisioning; joining an existing domain is a future
+  separate module, not this one.
+- **Binary, non-incremental idempotency.** Idempotency is "is a DC already
+  provisioned here, yes/no", not the read-diff-write of the object modules. An
+  already-provisioned domain is never re-provisioned and never reconciled
+  against the module's parameters: `present` means only "ensure a DC exists
+  here", not "ensure a DC with exactly these parameters". A parameter mismatch
+  against an existing domain is neither an error nor a change.
+- **`samba.provision` bindings, lazy-imported.** Consistent with the Samba
+  Backend decision (native bindings, not a `samba-tool` subprocess).
+  `samba.provision` (and `samba.auth`, `samba.param`, `samba.functional_level`,
+  `samba.dsdb`) are absent in the sanity container, so every import is lazy
+  (`find_spec` / `import_module` inside a function), the same mandatory pattern
+  as `samba_conn`.
+
+### Verified API (samba 4.23.8)
+
+- `provision(logger, session_info, ...)` — `logger` and `session_info` are the
+  only positional requireds (48 parameters total); everything else is keyword
+  with sane defaults. `samba-tool domain provision` itself calls this with
+  `logger=get_logger(...)`, `session_info=samba.auth.system_session()` and
+  `lp=sambaopts.get_loadparm()`.
+- Module option -> `provision()` parameter mapping:
+  - `realm` -> `realm`; `domain` (NetBIOS) -> `domain`; `hostname` ->
+    `hostname`.
+  - `dns_backend` -> `dns_backend`, one of `SAMBA_INTERNAL` / `BIND9_DLZ` /
+    `BIND9_FLATFILE` / `NONE`.
+  - server role -> `serverrole="dc"` (samba canonicalizes via
+    `sanitize_server_role` to `"active directory domain controller"`).
+  - function level -> `dom_for_fun_level`, mapped from a friendly string via
+    `samba.functional_level.string_to_level`; valid keys are `2000`, `2003`,
+    `2008`, `2008_R2`, `2012`, `2012_R2`, `2016`; samba's own default when
+    unset is `DS_DOMAIN_FUNCTION_2008_R2`.
+  - admin password -> `adminpass` (secret -> `no_log`); samba enforces password
+    quality, so a weak password fails provisioning with a clear error.
+  - `use_rfc2307` -> `use_rfc2307` (bool).
+- Not exposed (internal/dangerous; left at samba defaults): the `*dn` overrides
+  (`rootdn`/`domaindn`/`schemadn`/...), the secret/guid internals
+  (`krbtgtpass`/`machinepass`/`*guid`), `targetdir`/`smbconf` paths,
+  `backend_store`, `base_schema`, `adprep_level`, `next_rid`, etc.
+- Return: a `ProvisionResult` with `server_role`, `paths`, `domaindn`,
+  `domainsid`, `names` (`hostname`/`domain`/`dnsdomain`), and `samdb`/`lp`. The
+  module returns the non-secret subset (e.g. `domaindn`, `domainsid`,
+  `dnsdomain`, server role); `adminpass`/`adminpass_generated` are never
+  returned.
+- Idempotency open: the local `sam.ldb` path is `lp.private_path("sam.ldb")`
+  (`/var/lib/samba/private/sam.ldb` by default, smb.conf-respecting, not
+  hardcoded). "Provisioned" = the file exists AND opens as
+  `SamDB(url=<path>, session_info=system_session(), lp=lp)` and answers a query;
+  file absent = not provisioned; file present but unopenable = a clear
+  `fail_json` ("present but broken"), never a silent re-provision. This local
+  `system_session` open is the one place the collection still uses the
+  credential-free local LDB path that the object modules abandoned (see
+  Connection Model) — justified because provisioning is inherently pre-DC and
+  local, with no DC to authenticate against yet.
+
+### Open design points (settled in Phase 2)
+
+- **check_mode**: provisioning cannot be dry-run by samba. `check_mode` reads
+  the idempotency state only (provisioned yes/no) and returns `changed`
+  accordingly, without provisioning. `supports_check_mode=True` with that
+  read-only behaviour.
+- **no_log**: `adminpass` is a secret (rule 8) -> `no_log` on the option; never
+  in return, diff or error.
+- **Non-idempotency boundary**: an existing domain is never re-provisioned or
+  diffed; a parameter mismatch is a no-op, not a failure (`present` = "a DC
+  exists here").
+- **Race/TOCTOU (rule 9)**: the window between the "not provisioned" check and
+  `provision()` is negligible — provisioning is a one-time setup step, not a
+  concurrent path. `provision()` into a non-empty private dir fails on its own,
+  which is surfaced as a clear `fail_json` rather than a traceback.
+
+### Status
+
+Proposed to the maintainer in this phase (verification only). No module code is
+written until this decision is accepted; Phase 2 implements on this finding.
