@@ -84,7 +84,28 @@ def build_desired(params):
     desired = {"group_type": group_type(params["scope"], params["category"])}
     if params.get("description") is not None:
         desired["description"] = params["description"]
+    if params.get("gid_number") is not None:
+        desired["gid_number"] = params["gid_number"]
     return desired
+
+
+def check_posix_preconditions(desired, io):
+    """Validate C(gid_number) and refuse it on a non-RFC2307 domain.
+
+    Fires only when the caller actually set C(gid_number), so groups that never
+    touch POSIX attributes are unaffected and the provisioning probe is skipped.
+    Validates the integer and, before any write, refuses with a clear error when
+    the domain was not provisioned with C(--use-rfc2307).
+    """
+    if "gid_number" not in desired:
+        return
+    if desired["gid_number"] < 0:
+        raise SambaGroupError("gid_number must be a non-negative integer")
+    if not io.rfc2307_provisioned():
+        raise SambaGroupError(
+            "domain is not provisioned with RFC2307/--use-rfc2307; "
+            "cannot set POSIX attributes (gid_number)"
+        )
 
 
 def plan(state, current, desired):
@@ -98,11 +119,15 @@ def plan(state, current, desired):
         attr_changes = {}
         if "description" in desired:
             attr_changes["description"] = desired["description"]
+        if "gid_number" in desired:
+            attr_changes["gid_number"] = desired["gid_number"]
         return {"action": "create", "attr_changes": attr_changes, "changed": True}
 
     attr_changes = {}
     if "description" in desired and current.get("description") != desired["description"]:
         attr_changes["description"] = desired["description"]
+    if "gid_number" in desired and current.get("gid_number") != desired["gid_number"]:
+        attr_changes["gid_number"] = desired["gid_number"]
     if not _same_group_type(current["group_type"], desired["group_type"]):
         attr_changes["group_type"] = desired["group_type"]
     changed = bool(attr_changes)
@@ -122,11 +147,12 @@ def diff_members(current_dns, desired_dns, purge):
     return {"adds": adds, "removes": removes}
 
 
-def _decoded_fields(group_type_value, description, members):
+def _decoded_fields(group_type_value, description, gid_number, members):
     """Return the managed fields decoded for human-readable diff/return."""
     scope, category = decode_group_type(group_type_value)
     return {
         "description": description,
+        "gid_number": gid_number,
         "scope": scope,
         "category": category,
         "members": sorted(members),
@@ -148,14 +174,18 @@ def _effective_state(current, desired, planned, member_diff):
     if current is not None:
         group_type_value = current["group_type"]
         description = current.get("description")
+        gid_number = current.get("gid_number")
     else:
         group_type_value = desired["group_type"]
         description = desired.get("description")
+        gid_number = desired.get("gid_number")
     if "group_type" in planned["attr_changes"]:
         group_type_value = planned["attr_changes"]["group_type"]
     if "description" in planned["attr_changes"]:
         description = planned["attr_changes"]["description"]
-    return _decoded_fields(group_type_value, description, _effective_members(current, member_diff))
+    if "gid_number" in planned["attr_changes"]:
+        gid_number = planned["attr_changes"]["gid_number"]
+    return _decoded_fields(group_type_value, description, gid_number, _effective_members(current, member_diff))
 
 
 def public_state(current, name):
@@ -165,14 +195,18 @@ def public_state(current, name):
     state = {"name": name, "state": "present"}
     if current.get("_dn") is not None:
         state["dn"] = current["_dn"]
-    state.update(_decoded_fields(current["group_type"], current.get("description"), current.get("members", [])))
+    state.update(_decoded_fields(
+        current["group_type"], current.get("description"), current.get("gid_number"), current.get("members", []),
+    ))
     return state
 
 
 def build_diff(state, current, desired, planned, member_diff):
     """Build an Ansible before/after diff for the managed group fields."""
     before = (
-        _decoded_fields(current["group_type"], current.get("description"), current.get("members", []))
+        _decoded_fields(
+            current["group_type"], current.get("description"), current.get("gid_number"), current.get("members", []),
+        )
         if current is not None else {}
     )
     if state == "absent":
@@ -183,8 +217,9 @@ def build_diff(state, current, desired, planned, member_diff):
 def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
-    ``io`` provides ``read_current``, ``resolve_member``, ``create_group``,
-    ``set_description``, ``set_group_type``, ``add_member``, ``remove_member``,
+    ``io`` provides ``read_current``, ``rfc2307_provisioned``,
+    ``resolve_member``, ``create_group``, ``set_description``,
+    ``set_group_type``, ``set_gid_number``, ``add_member``, ``remove_member``,
     ``delete_group`` and the move helpers ``needs_move``, ``parent_exists`` and
     ``move``. Injecting it keeps this function testable without the bindings.
     """
@@ -194,6 +229,9 @@ def run(params, check_mode, io):
     purge = params["members_purge"]
     path = params.get("path")
     desired = build_desired(params)
+
+    if state == "present":
+        check_posix_preconditions(desired, io)
 
     current = io.read_current(name)
     planned = plan(state, current, desired)
@@ -275,6 +313,11 @@ def run(params, check_mode, io):
             io.set_description(current["_dn"], planned["attr_changes"]["description"])
         if "group_type" in planned["attr_changes"]:
             io.set_group_type(current["_dn"], planned["attr_changes"]["group_type"])
+
+    # gidNumber is set via a dedicated modify on both create (newgroup does not
+    # take it) and modify; plan() puts it in attr_changes for both actions.
+    if "gid_number" in planned["attr_changes"]:
+        io.set_gid_number(current["_dn"], planned["attr_changes"]["gid_number"])
 
     member_changed = False
     for dn in member_diff["adds"]:

@@ -18,15 +18,31 @@ class SambaUserError(Exception):
     """User-facing error the module turns into ``fail_json``."""
 
 
-#: Module parameter names of the simple string attributes we manage, mapped to
-#: their LDAP attribute names.
+#: Module parameter names of the scalar attributes we manage, mapped to their
+#: LDAP attribute names. The first group are simple strings; the RFC2307/POSIX
+#: attributes follow and are handled the same way, except that the two integer
+#: ones (see :data:`POSIX_INT_ATTRS`) are normalised to ``int`` on read and
+#: written as a decimal string (LDB stores integers as decimal text).
 ATTR_TO_LDAP = {
     "given_name": "givenName",
     "surname": "sn",
     "display_name": "displayName",
     "email": "mail",
     "description": "description",
+    "uid_number": "uidNumber",
+    "gid_number": "gidNumber",
+    "unix_home_directory": "unixHomeDirectory",
+    "login_shell": "loginShell",
+    "gecos": "gecos",
 }
+
+#: The RFC2307/POSIX attributes. They require a domain provisioned with
+#: ``--use-rfc2307``; setting any of them on a non-provisioned domain is refused
+#: up front (see :func:`run`).
+POSIX_ATTRS = ("uid_number", "gid_number", "unix_home_directory", "login_shell", "gecos")
+
+#: The POSIX attributes whose value is an integer (LDAP INTEGER syntax).
+POSIX_INT_ATTRS = ("uid_number", "gid_number")
 
 #: ACCOUNTDISABLE bit inside the ``userAccountControl`` attribute.
 UAC_ACCOUNTDISABLE = 0x0002
@@ -133,13 +149,35 @@ def build_diff(state, current, desired, planned):
     return {"before": before, "after": _effective_fields(current, desired, planned)}
 
 
+def check_posix_preconditions(desired, io):
+    """Validate POSIX attributes and refuse them on a non-RFC2307 domain.
+
+    Fires only when the caller actually set at least one POSIX attribute, so
+    playbooks that never touch them are unaffected and the provisioning probe is
+    skipped entirely. Validates the integer fields and, before any write, refuses
+    with a clear error when the domain was not provisioned with --use-rfc2307.
+    """
+    posix_requested = [name for name in POSIX_ATTRS if name in desired]
+    if not posix_requested:
+        return
+    for name in POSIX_INT_ATTRS:
+        value = desired.get(name)
+        if value is not None and value < 0:
+            raise SambaUserError("%s must be a non-negative integer" % name)
+    if not io.rfc2307_provisioned():
+        raise SambaUserError(
+            "domain is not provisioned with RFC2307/--use-rfc2307; "
+            "cannot set POSIX attributes (%s)" % ", ".join(posix_requested)
+        )
+
+
 def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
-    ``io`` provides ``read_current``, ``create_user``, ``apply_attrs``,
-    ``set_enabled``, ``set_password``, ``delete_user`` and the move helpers
-    ``needs_move``, ``parent_exists`` and ``move``. Injecting it keeps this
-    function testable without the samba bindings.
+    ``io`` provides ``read_current``, ``rfc2307_provisioned``, ``create_user``,
+    ``apply_attrs``, ``set_enabled``, ``set_password``, ``delete_user`` and the
+    move helpers ``needs_move``, ``parent_exists`` and ``move``. Injecting it
+    keeps this function testable without the samba bindings.
     """
     username = params["username"]
     state = params["state"]
@@ -147,6 +185,9 @@ def run(params, check_mode, io):
     update_password = params["update_password"]
     path = params.get("path")
     desired = build_desired(params)
+
+    if state == "present":
+        check_posix_preconditions(desired, io)
 
     current = io.read_current(username)
     planned = plan(state, current, desired)

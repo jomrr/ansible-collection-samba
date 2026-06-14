@@ -208,6 +208,21 @@
             password: "{{ _seed_password }}"
             state: present
 
+        - name: Prepare | seed | user whose POSIX attributes converge will change
+          jomrr.samba.samba_user:
+            username: posixmod
+            uid_number: 10500
+            login_shell: /bin/sh
+            password: "{{ _seed_password }}"
+            state: present
+
+        - name: Prepare | seed | group whose POSIX gid converge will set
+          jomrr.samba.samba_group:
+            name: posixgrp
+            scope: global
+            category: security
+            state: present
+
         - name: Prepare | seed | user converge will disable
           jomrr.samba.samba_user:
             username: todisable

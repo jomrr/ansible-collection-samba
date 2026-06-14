@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
 
 
@@ -111,6 +113,64 @@ def test_plan_group_type_signed_current_is_idempotent():
     desired = logic.build_desired(make_params(scope="global", category="security"))
     planned = logic.plan("present", make_current(group_type=-2147483646), desired)
     assert planned["changed"] is False
+
+
+# --- RFC2307/POSIX gid_number ---
+
+def test_build_desired_includes_gid_number():
+    assert logic.build_desired(make_params(gid_number=10000))["gid_number"] == 10000
+
+
+def test_plan_gid_number_change():
+    desired = logic.build_desired(make_params(gid_number=10000))
+    planned = logic.plan("present", make_current(gid_number=500), desired)
+    assert planned["attr_changes"] == {"gid_number": 10000}
+    assert planned["changed"] is True
+
+
+def test_plan_gid_number_idempotent_integer():
+    # Same integer gid must not look like a change (no str-vs-int artifact).
+    desired = logic.build_desired(make_params(gid_number=10000))
+    planned = logic.plan("present", make_current(gid_number=10000), desired)
+    assert planned["action"] == "none"
+    assert planned["changed"] is False
+
+
+class _ProbeIO:
+    """Minimal io exposing only the provisioning probe the precheck needs."""
+
+    def __init__(self, provisioned):
+        self._provisioned = provisioned
+        self.probed = False
+
+    def rfc2307_provisioned(self):
+        self.probed = True
+        return self._provisioned
+
+
+def test_precheck_no_gid_skips_probe():
+    io = _ProbeIO(provisioned=False)
+    logic.check_posix_preconditions(logic.build_desired(make_params(description="x")), io)
+    assert io.probed is False
+
+
+def test_precheck_refuses_without_rfc2307():
+    io = _ProbeIO(provisioned=False)
+    with pytest.raises(logic.SambaGroupError):
+        logic.check_posix_preconditions(logic.build_desired(make_params(gid_number=10000)), io)
+
+
+def test_precheck_passes_with_rfc2307():
+    io = _ProbeIO(provisioned=True)
+    logic.check_posix_preconditions(logic.build_desired(make_params(gid_number=10000)), io)
+    assert io.probed is True
+
+
+def test_precheck_negative_gid_fails_before_probe():
+    io = _ProbeIO(provisioned=True)
+    with pytest.raises(logic.SambaGroupError):
+        logic.check_posix_preconditions(logic.build_desired(make_params(gid_number=-1)), io)
+    assert io.probed is False
 
 
 # --- member set-diff ---

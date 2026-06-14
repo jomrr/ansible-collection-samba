@@ -129,6 +129,22 @@ def test_query_missing_group_is_empty(monkeypatch):
     assert samba_group_info.query(FakeSamDB(result=[]), "ghost") == []
 
 
+def test_query_returns_gid_number(monkeypatch):
+    # Field name matches the samba_group write param, so _info round-trips back.
+    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    samdb = FakeSamDB(result=[
+        group_msg("engineers", logic.group_type("global", "security"), gidNumber="10000"),
+    ])
+    group = samba_group_info.query(samdb, "engineers")[0]
+    assert group["gid_number"] == 10000
+
+
+def test_query_missing_gid_number_is_none(monkeypatch):
+    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    samdb = FakeSamDB(result=[group_msg("g", logic.group_type("global", "security"))])
+    assert samba_group_info.query(samdb, "g")[0]["gid_number"] is None
+
+
 class AnsibleExitJson(Exception):
     """Raised by the patched exit_json to capture the module result."""
 

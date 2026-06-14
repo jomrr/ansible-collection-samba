@@ -8,6 +8,8 @@ layer must not require them."""
 
 from __future__ import annotations
 
+import pytest
+
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
 
 
@@ -112,3 +114,73 @@ def test_build_diff_present_modify():
     diff = logic.build_diff("present", current, desired, planned)
     assert diff["before"]["given_name"] == "Old"
     assert diff["after"]["given_name"] == "New"
+
+
+# --- RFC2307/POSIX attributes ---
+
+def test_build_desired_includes_posix():
+    desired = logic.build_desired(make_params(uid_number=10001, unix_home_directory="/home/jdoe"))
+    assert desired["uid_number"] == 10001
+    assert desired["unix_home_directory"] == "/home/jdoe"
+
+
+def test_plan_posix_string_and_int_create_collects():
+    desired = logic.build_desired(make_params(uid_number=10001, login_shell="/bin/bash"))
+    planned = logic.plan("present", None, desired)
+    assert planned["attr_changes"]["uid_number"] == 10001
+    assert planned["attr_changes"]["login_shell"] == "/bin/bash"
+
+
+def test_plan_posix_integer_idempotent_no_artifact():
+    # Same integer uid/gid must not look like a change (no str-vs-int artifact).
+    desired = logic.build_desired(make_params(uid_number=10001, gid_number=10000))
+    planned = logic.plan("present", make_current(uid_number=10001, gid_number=10000), desired)
+    assert planned["action"] == "none"
+    assert planned["changed"] is False
+
+
+def test_plan_posix_integer_diff():
+    desired = logic.build_desired(make_params(uid_number=10002))
+    planned = logic.plan("present", make_current(uid_number=10001), desired)
+    assert planned["attr_changes"] == {"uid_number": 10002}
+    assert planned["changed"] is True
+
+
+class _ProbeIO:
+    """Minimal io exposing only the provisioning probe the precheck needs."""
+
+    def __init__(self, provisioned):
+        self._provisioned = provisioned
+        self.probed = False
+
+    def rfc2307_provisioned(self):
+        self.probed = True
+        return self._provisioned
+
+
+def test_precheck_no_posix_skips_probe():
+    # The critical negative: no POSIX attribute set -> provisioning is never
+    # probed, so a non-rfc2307 domain is completely unaffected.
+    io = _ProbeIO(provisioned=False)
+    logic.check_posix_preconditions(logic.build_desired(make_params(given_name="Jane")), io)
+    assert io.probed is False
+
+
+def test_precheck_refuses_without_rfc2307():
+    io = _ProbeIO(provisioned=False)
+    with pytest.raises(logic.SambaUserError):
+        logic.check_posix_preconditions(logic.build_desired(make_params(uid_number=10001)), io)
+    assert io.probed is True
+
+
+def test_precheck_passes_with_rfc2307():
+    io = _ProbeIO(provisioned=True)
+    logic.check_posix_preconditions(logic.build_desired(make_params(uid_number=10001)), io)
+    assert io.probed is True
+
+
+def test_precheck_negative_integer_fails_before_probe():
+    io = _ProbeIO(provisioned=True)
+    with pytest.raises(logic.SambaUserError):
+        logic.check_posix_preconditions(logic.build_desired(make_params(gid_number=-1)), io)
+    assert io.probed is False

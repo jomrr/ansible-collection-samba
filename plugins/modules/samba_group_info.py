@@ -88,6 +88,11 @@ groups:
       returned: always
       type: str
       sample: Engineering staff
+    gid_number:
+      description: The POSIX group ID (C(gidNumber)), or null if unset.
+      returned: always
+      type: int
+      sample: 10000
     members:
       description: The distinguished names of the group members.
       returned: always

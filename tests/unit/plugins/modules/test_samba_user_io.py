@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_user
 
@@ -34,6 +35,7 @@ class FakeLdb:
     """Records escaping calls and provides the symbols SambaUserIO uses."""
 
     SCOPE_SUBTREE = 2
+    SCOPE_BASE = 0
     FLAG_MOD_REPLACE = 2
     ERR_NO_SUCH_OBJECT = 32
     ERR_ENTRY_ALREADY_EXISTS = 68
@@ -78,6 +80,7 @@ class FakeSamDB:
         self.delete_error = delete_error
         self.setpassword_error = setpassword_error
         self.captured = {}
+        self.modified = []
         self.deleted = []
         self.setpassword_filters = []
 
@@ -95,6 +98,7 @@ class FakeSamDB:
     def modify(self, message):
         if self.modify_error is not None:
             raise self.modify_error
+        self.modified.append(message)
 
     def delete(self, dn):
         if self.delete_error is not None:
@@ -207,3 +211,64 @@ def test_set_password_other_ldberror_propagates():
     samdb = FakeSamDB(setpassword_error=FakeLdbError(999, "boom"))
     with pytest.raises(FakeLdbError):
         make_io(fake_ldb, samdb).set_password("jdoe", "pw")
+
+
+# --- RFC2307/POSIX attributes ---
+
+def test_message_to_state_normalises_posix_integers():
+    msg = FoundMessage(
+        {
+            "sAMAccountName": ["jdoe"],
+            "uidNumber": ["10001"],
+            "gidNumber": ["10000"],
+            "loginShell": ["/bin/bash"],
+            "userAccountControl": ["512"],
+        },
+        "CN=jdoe,DC=example,DC=com",
+    )
+    state = samba_user_io.message_to_state(msg)
+    # Integer attrs come back as int (so the diff is int-vs-int, no artifact)...
+    assert state["uid_number"] == 10001
+    assert isinstance(state["uid_number"], int)
+    assert state["gid_number"] == 10000
+    # ...string attrs as str, and unset attrs as None (no error).
+    assert state["login_shell"] == "/bin/bash"
+    assert state["unix_home_directory"] is None
+    assert state["gecos"] is None
+
+
+def test_apply_attrs_writes_integer_as_decimal_string():
+    samdb = FakeSamDB()
+    make_io(FakeLdb(), samdb).apply_attrs("CN=jdoe,DC=example,DC=com", {"uid_number": 10001})
+    written = samdb.modified[0].elements["uidNumber"]
+    assert written == ("10001", FakeLdb.FLAG_MOD_REPLACE, "uidNumber")
+
+
+class ExistsSamDB:
+    """Fake SamDB for the rfc2307 provisioning probe (base-scope existence)."""
+
+    def __init__(self, exists):
+        self.exists = exists
+        self.searched = []
+
+    def domain_dn(self):
+        return "DC=example,DC=com"
+
+    def search(self, base, scope, attrs):
+        self.searched.append((base, scope))
+        if not self.exists:
+            raise FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "no such object")
+        return ["present"]
+
+
+def test_rfc2307_provisioned_true(monkeypatch):
+    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    samdb = ExistsSamDB(exists=True)
+    assert samba_user_io.rfc2307_provisioned(samdb) is True
+    # Probed the well-known fake-ypserver container with a base-scope search.
+    assert samdb.searched and samdb.searched[0][1] == FakeLdb.SCOPE_BASE
+
+
+def test_rfc2307_provisioned_false(monkeypatch):
+    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    assert samba_user_io.rfc2307_provisioned(ExistsSamDB(exists=False)) is False

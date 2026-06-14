@@ -54,6 +54,12 @@ options:
       - A free-form description of the group, mapped to the LDAP C(description)
         attribute.
     type: str
+  gid_number:
+    description:
+      - The POSIX group ID, mapped to the RFC2307 C(gidNumber) attribute.
+      - Requires a domain provisioned with C(--use-rfc2307); setting it on a
+        domain without RFC2307 fails before any change is made.
+    type: int
   members:
     description:
       - Members of the group, given by their C(sAMAccountName) (users, groups
@@ -119,6 +125,11 @@ EXAMPLES = r"""
     scope: universal
     category: distribution
 
+- name: Set the POSIX gid (domain provisioned with --use-rfc2307)
+  jomrr.samba.samba_group:
+    name: engineers
+    gid_number: 10000
+
 - name: Remove a group
   jomrr.samba.samba_group:
     name: engineers
@@ -168,6 +179,11 @@ group:
       returned: when the group exists
       type: str
       sample: Engineering staff
+    gid_number:
+      description: The POSIX group ID (C(gidNumber)), or null if unset.
+      returned: when the group exists
+      type: int
+      sample: 10000
     members:
       description: The distinguished names of the group members.
       returned: when the group exists
@@ -245,6 +261,22 @@ class SambaGroupIO:
         message.dn = ldb.Dn(self.samdb, dn)
         message["description"] = ldb.MessageElement(description, ldb.FLAG_MOD_REPLACE, "description")
         self._modify(message, dn)
+
+    def set_gid_number(self, dn, gid_number):
+        """Replace the gidNumber (RFC2307 POSIX gid), written as decimal text.
+
+        Fails cleanly if the object was removed (concurrent delete) before the
+        modify reached the DC.
+        """
+        ldb = samba_user_io.load_ldb()
+        message = ldb.Message()
+        message.dn = ldb.Dn(self.samdb, dn)
+        message["gidNumber"] = ldb.MessageElement(str(gid_number), ldb.FLAG_MOD_REPLACE, "gidNumber")
+        self._modify(message, dn)
+
+    def rfc2307_provisioned(self):
+        """True if the domain was provisioned with C(--use-rfc2307)."""
+        return samba_user_io.rfc2307_provisioned(self.samdb)
 
     def set_group_type(self, dn, group_type_value):
         """Replace the groupType. A rejected scope/category change fails cleanly."""
@@ -351,6 +383,7 @@ def main():
         scope=dict(type="str", default="global", choices=["global", "domain_local", "universal"]),
         category=dict(type="str", default="security", choices=["security", "distribution"]),
         description=dict(type="str"),
+        gid_number=dict(type="int"),
         members=dict(type="list", elements="str"),
         members_purge=dict(type="bool", default=False),
         path=dict(type="str"),

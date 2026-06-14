@@ -13,7 +13,7 @@ from __future__ import annotations
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
 
 #: LDAP attributes read to build the normalized group state.
-GROUP_ATTRS = ["sAMAccountName", "groupType", "description", "member"]
+GROUP_ATTRS = ["sAMAccountName", "groupType", "description", "gidNumber", "member"]
 
 
 def message_to_state(message):
@@ -23,6 +23,7 @@ def message_to_state(message):
     members = [str(value) for value in members_element] if members_element is not None else []
     return {
         "description": samba_user_io.first_value(message, "description"),
+        "gid_number": samba_user_io.int_value(message, "gidNumber"),
         "group_type": int(group_type_raw) if group_type_raw is not None else 0,
         "members": members,
         "_dn": str(message.dn),

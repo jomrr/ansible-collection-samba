@@ -54,6 +54,24 @@
         description: New multi description
         state: present
 
+    - name: Converge | Create a user with the full RFC2307/POSIX attribute set
+      jomrr.samba.samba_user:
+        username: posixuser
+        password: "{{ _password }}"
+        uid_number: 10001
+        gid_number: 10000
+        unix_home_directory: /home/posixuser
+        login_shell: /bin/bash
+        gecos: POSIX User
+        state: present
+
+    - name: Converge | Change single POSIX attributes on an existing user (int + string)
+      jomrr.samba.samba_user:
+        username: posixmod
+        uid_number: 10002
+        login_shell: /bin/zsh
+        state: present
+
     - name: Converge | Disable an existing user
       jomrr.samba.samba_user:
         username: todisable
@@ -106,6 +124,12 @@
         name: scopechange
         scope: universal
         category: security
+        state: present
+
+    - name: Converge | Set the POSIX gid on an existing group
+      jomrr.samba.samba_group:
+        name: posixgrp
+        gid_number: 10000
         state: present
 
     - name: Converge | Create a top-level OU

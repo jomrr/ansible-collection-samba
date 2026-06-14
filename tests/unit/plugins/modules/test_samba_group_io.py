@@ -166,6 +166,28 @@ def test_set_group_type_invalid_transition_raises_clean():
         make_io(samdb).set_group_type("CN=g,DC=example,DC=com", logic.group_type("universal", "security"))
 
 
+def test_set_gid_number_writes_decimal_string():
+    samdb = FakeSamDB()
+    make_io(samdb).set_gid_number("CN=g,DC=example,DC=com", 10000)
+    written = samdb.modified[0].elements["gidNumber"]
+    assert written == ("10000", FakeLdb.FLAG_MOD_REPLACE, "gidNumber")
+
+
+def test_set_gid_number_vanished_raises_clean():
+    samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
+    with pytest.raises(logic.SambaGroupError):
+        make_io(samdb).set_gid_number("CN=g,DC=example,DC=com", 10000)
+
+
+def test_read_current_parses_gid_number():
+    msg = FakeMessage(
+        {"sAMAccountName": ["g"], "groupType": ["-2147483646"], "gidNumber": ["10000"]},
+        "CN=g,DC=example,DC=com",
+    )
+    current = make_io(FakeSamDB(search_result=[msg])).read_current("g")
+    assert current["gid_number"] == 10000
+
+
 def test_add_member_collision_is_noop():
     samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_ATTRIBUTE_OR_VALUE_EXISTS, "exists"))
     assert make_io(samdb).add_member("CN=g,DC=example,DC=com", "CN=a,DC=example,DC=com") is False

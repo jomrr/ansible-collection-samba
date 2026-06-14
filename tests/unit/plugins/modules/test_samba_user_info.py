@@ -94,6 +94,22 @@ def test_query_single_missing_user_is_empty(monkeypatch):
     assert samba_user_info.query(FakeSamDB(result=[]), "ghost") == []
 
 
+def test_query_returns_posix_attributes(monkeypatch):
+    # The _info output uses the same field names as the samba_user write params
+    # (uid_number etc.), so it round-trips straight back as write input.
+    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    samdb = FakeSamDB(result=[
+        user_msg("jdoe", uidNumber="10001", gidNumber="10000", loginShell="/bin/bash"),
+    ])
+    user = samba_user_info.query(samdb, "jdoe")[0]
+    assert user["uid_number"] == 10001
+    assert user["gid_number"] == 10000
+    assert user["login_shell"] == "/bin/bash"
+    # Attributes the user does not have are reported as None, never an error.
+    assert user["unix_home_directory"] is None
+    assert user["gecos"] is None
+
+
 def test_query_all_users_returns_list(monkeypatch):
     fake_ldb = FakeLdb()
     monkeypatch.setattr(samba_user_io, "load_ldb", lambda: fake_ldb)

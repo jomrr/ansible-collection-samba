@@ -21,13 +21,18 @@ def member_dn(name):
 class FakeIO:
     """Records calls and simulates a group store; no samba required."""
 
-    def __init__(self, current=None):
+    def __init__(self, current=None, provisioned=True):
         self.current = current
+        self.provisioned = provisioned
         self.calls = []
 
     def read_current(self, name):
         self.calls.append(("read_current", name))
         return self.current
+
+    def rfc2307_provisioned(self):
+        self.calls.append(("rfc2307_provisioned",))
+        return self.provisioned
 
     def resolve_member(self, name):
         self.calls.append(("resolve_member", name))
@@ -49,6 +54,10 @@ class FakeIO:
     def set_group_type(self, dn, group_type_value):
         self.calls.append(("set_group_type", group_type_value))
         self.current["group_type"] = group_type_value
+
+    def set_gid_number(self, dn, gid_number):
+        self.calls.append(("set_gid_number", gid_number))
+        self.current["gid_number"] = gid_number
 
     def add_member(self, group_dn, dn):
         self.calls.append(("add_member", dn))
@@ -230,6 +239,54 @@ def test_member_add_race_all_noop_reports_unchanged():
     assert "add_member" in call_names(fake)
     assert result["changed"] is False
     assert result["action"] == "unchanged"
+
+
+# --- RFC2307/POSIX gid_number ---
+
+def test_gid_number_create_sets_it():
+    fake = FakeIO(current=None)
+    result = logic.run(make_params(gid_number=10000), False, fake)
+    assert result["changed"] is True
+    assert ("set_gid_number", 10000) in fake.calls
+    assert result["group"]["gid_number"] == 10000
+
+
+def test_gid_number_modify_sets_it():
+    fake = FakeIO(current=existing_group(gid_number=500))
+    result = logic.run(make_params(gid_number=10000), False, fake)
+    assert result["changed"] is True
+    assert ("set_gid_number", 10000) in fake.calls
+
+
+def test_gid_number_idempotent_integer():
+    fake = FakeIO(current=existing_group(gid_number=10000))
+    result = logic.run(make_params(gid_number=10000), False, fake)
+    assert result["changed"] is False
+    assert "set_gid_number" not in call_names(fake)
+
+
+def test_gid_refused_without_rfc2307_before_any_write():
+    fake = FakeIO(current=existing_group(), provisioned=False)
+    with pytest.raises(logic.SambaGroupError):
+        logic.run(make_params(gid_number=10000), False, fake)
+    assert "set_gid_number" not in call_names(fake)
+
+
+def test_gid_negative_integer_fails():
+    fake = FakeIO(current=existing_group(), provisioned=True)
+    with pytest.raises(logic.SambaGroupError):
+        logic.run(make_params(gid_number=-1), False, fake)
+    assert "set_gid_number" not in call_names(fake)
+
+
+def test_non_posix_run_on_non_rfc2307_domain_is_unaffected():
+    # The non-negotiable negative test: with no gid_number set, the provisioning
+    # state is never probed and a normal change goes through unchanged.
+    fake = FakeIO(current=existing_group(description="old"), provisioned=False)
+    result = logic.run(make_params(description="new"), False, fake)
+    assert result["changed"] is True
+    assert ("set_description", "new") in fake.calls
+    assert "rfc2307_provisioned" not in call_names(fake)
 
 
 class _MovingIO(FakeIO):

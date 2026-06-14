@@ -101,6 +101,31 @@ users:
       returned: always
       type: str
       sample: Example user
+    uid_number:
+      description: The POSIX user ID (C(uidNumber)), or null if unset.
+      returned: always
+      type: int
+      sample: 10001
+    gid_number:
+      description: The POSIX primary group ID (C(gidNumber)), or null if unset.
+      returned: always
+      type: int
+      sample: 10000
+    unix_home_directory:
+      description: The POSIX home directory (C(unixHomeDirectory)), or null if unset.
+      returned: always
+      type: str
+      sample: /home/jdoe
+    login_shell:
+      description: The POSIX login shell (C(loginShell)), or null if unset.
+      returned: always
+      type: str
+      sample: /bin/bash
+    gecos:
+      description: The POSIX GECOS field (C(gecos)), or null if unset.
+      returned: always
+      type: str
+      sample: Jane Doe
     enabled:
       description: Whether the account is enabled.
       returned: always

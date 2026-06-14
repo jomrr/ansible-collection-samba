@@ -56,6 +56,35 @@ options:
       - A free-form description of the user, mapped to the LDAP C(description)
         attribute.
     type: str
+  uid_number:
+    description:
+      - The POSIX user ID, mapped to the RFC2307 C(uidNumber) attribute.
+      - Requires a domain provisioned with C(--use-rfc2307); setting it on a
+        domain without RFC2307 fails before any change is made.
+    type: int
+  gid_number:
+    description:
+      - The POSIX primary group ID, mapped to the RFC2307 C(gidNumber)
+        attribute.
+      - Requires a domain provisioned with C(--use-rfc2307); setting it on a
+        domain without RFC2307 fails before any change is made.
+    type: int
+  unix_home_directory:
+    description:
+      - The POSIX home directory, mapped to the RFC2307 C(unixHomeDirectory)
+        attribute.
+      - Requires a domain provisioned with C(--use-rfc2307).
+    type: str
+  login_shell:
+    description:
+      - The POSIX login shell, mapped to the RFC2307 C(loginShell) attribute.
+      - Requires a domain provisioned with C(--use-rfc2307).
+    type: str
+  gecos:
+    description:
+      - The POSIX GECOS field, mapped to the RFC2307 C(gecos) attribute.
+      - Requires a domain provisioned with C(--use-rfc2307).
+    type: str
   enabled:
     description:
       - Whether the account is enabled.
@@ -133,6 +162,15 @@ EXAMPLES = r"""
     username: jdoe
     display_name: Jane M. Doe
 
+- name: Set the RFC2307/POSIX attributes (domain provisioned with --use-rfc2307)
+  jomrr.samba.samba_user:
+    username: jdoe
+    uid_number: 10001
+    gid_number: 10000
+    unix_home_directory: /home/jdoe
+    login_shell: /bin/bash
+    gecos: Jane Doe
+
 - name: Remove a user
   jomrr.samba.samba_user:
     username: jdoe
@@ -192,6 +230,31 @@ user:
       returned: when the user exists
       type: str
       sample: Example user
+    uid_number:
+      description: The POSIX user ID (C(uidNumber)), or null if unset.
+      returned: when the user exists
+      type: int
+      sample: 10001
+    gid_number:
+      description: The POSIX primary group ID (C(gidNumber)), or null if unset.
+      returned: when the user exists
+      type: int
+      sample: 10000
+    unix_home_directory:
+      description: The POSIX home directory (C(unixHomeDirectory)), or null if unset.
+      returned: when the user exists
+      type: str
+      sample: /home/jdoe
+    login_shell:
+      description: The POSIX login shell (C(loginShell)), or null if unset.
+      returned: when the user exists
+      type: str
+      sample: /bin/bash
+    gecos:
+      description: The POSIX GECOS field (C(gecos)), or null if unset.
+      returned: when the user exists
+      type: str
+      sample: Jane Doe
     enabled:
       description: Whether the account is enabled.
       returned: when the user exists
@@ -257,18 +320,23 @@ class SambaUserIO:
             raise
 
     def apply_attrs(self, dn, attr_changes):
-        """Replace the given simple attributes on the user object.
+        """Replace the given scalar attributes on the user object.
 
-        Fails cleanly if the object was removed (concurrent delete) before the
-        modify reached the DC.
+        Values are written as text (LDB stores the integer POSIX attributes as
+        decimal strings too). Fails cleanly if the object was removed (concurrent
+        delete) before the modify reached the DC.
         """
         ldb = self._ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
         for name, value in attr_changes.items():
             ldap_attr = logic.ATTR_TO_LDAP[name]
-            message[ldap_attr] = ldb.MessageElement(value, ldb.FLAG_MOD_REPLACE, ldap_attr)
+            message[ldap_attr] = ldb.MessageElement(str(value), ldb.FLAG_MOD_REPLACE, ldap_attr)
         self._modify(message, dn)
+
+    def rfc2307_provisioned(self):
+        """True if the domain was provisioned with C(--use-rfc2307)."""
+        return samba_user_io.rfc2307_provisioned(self.samdb)
 
     def set_enabled(self, dn, current_uac, enabled):
         """Toggle the ACCOUNTDISABLE bit of ``userAccountControl``.
@@ -376,6 +444,11 @@ def main():
         display_name=dict(type="str"),
         email=dict(type="str"),
         description=dict(type="str"),
+        uid_number=dict(type="int"),
+        gid_number=dict(type="int"),
+        unix_home_directory=dict(type="str"),
+        login_shell=dict(type="str"),
+        gecos=dict(type="str"),
         enabled=dict(type="bool", default=True),
         password=dict(type="str", no_log=True),
         update_password=dict(type="str", default="on_create", choices=["on_create", "always"]),

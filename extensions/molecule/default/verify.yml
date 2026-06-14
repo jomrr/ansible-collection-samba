@@ -80,6 +80,32 @@
         that:
           - _todelete.users | length == 0
 
+    - name: Verify | Read the user created with the full POSIX attribute set
+      jomrr.samba.samba_user_info:
+        username: posixuser
+      register: _posixuser
+
+    - name: Verify | All POSIX attributes are present and correctly typed
+      ansible.builtin.assert:
+        that:
+          - _posixuser.users[0].uid_number == 10001
+          - _posixuser.users[0].gid_number == 10000
+          - _posixuser.users[0].uid_number is integer
+          - _posixuser.users[0].unix_home_directory == "/home/posixuser"
+          - _posixuser.users[0].login_shell == "/bin/bash"
+          - _posixuser.users[0].gecos == "POSIX User"
+
+    - name: Verify | Read the user whose POSIX attributes were changed
+      jomrr.samba.samba_user_info:
+        username: posixmod
+      register: _posixmod
+
+    - name: Verify | The changed POSIX integer and string attributes are present
+      ansible.builtin.assert:
+        that:
+          - _posixmod.users[0].uid_number == 10002
+          - _posixmod.users[0].login_shell == "/bin/zsh"
+
     - name: Verify | Read the created group
       jomrr.samba.samba_group_info:
         name: engineers
@@ -93,6 +119,17 @@
           - _engineers.groups[0].category == "security"
           - _engineers.groups[0].members | length == 1
           - "'jane' in (_engineers.groups[0].members | join(' ') | lower)"
+
+    - name: Verify | Read the group whose POSIX gid was set
+      jomrr.samba.samba_group_info:
+        name: posixgrp
+      register: _posixgrp
+
+    - name: Verify | The group POSIX gid is present and correctly typed
+      ansible.builtin.assert:
+        that:
+          - _posixgrp.groups[0].gid_number == 10000
+          - _posixgrp.groups[0].gid_number is integer
 
     - name: Verify | Read the purged group
       jomrr.samba.samba_group_info:

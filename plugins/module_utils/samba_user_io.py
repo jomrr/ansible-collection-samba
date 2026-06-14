@@ -24,6 +24,11 @@ USER_ATTRS = [
     "displayName",
     "mail",
     "description",
+    "uidNumber",
+    "gidNumber",
+    "unixHomeDirectory",
+    "loginShell",
+    "gecos",
     "userAccountControl",
 ]
 
@@ -88,6 +93,16 @@ def reparent_dn(samdb, object_dn, parent_dn):
     return build_child_dn(samdb, source.get_rdn_name(), source.get_rdn_value(), parent_dn)
 
 
+def int_value(message, attr):
+    """Return an integer LDB attribute as ``int`` or ``None``.
+
+    LDB stores integers as decimal text; normalising on read keeps the diff an
+    int-vs-int comparison, so an unchanged uid/gid never looks like a change.
+    """
+    raw = first_value(message, attr)
+    return int(raw) if raw is not None else None
+
+
 def message_to_state(message):
     """Map an LDB user message to the normalized current-state dict."""
     uac_raw = first_value(message, "userAccountControl")
@@ -98,7 +113,25 @@ def message_to_state(message):
         "display_name": first_value(message, "displayName"),
         "email": first_value(message, "mail"),
         "description": first_value(message, "description"),
+        "uid_number": int_value(message, "uidNumber"),
+        "gid_number": int_value(message, "gidNumber"),
+        "unix_home_directory": first_value(message, "unixHomeDirectory"),
+        "login_shell": first_value(message, "loginShell"),
+        "gecos": first_value(message, "gecos"),
         "enabled": not bool(uac & logic.UAC_ACCOUNTDISABLE),
         "_dn": str(message.dn),
         "_uac": uac,
     }
+
+
+def rfc2307_provisioned(samdb):
+    """True if the domain was provisioned with C(--use-rfc2307).
+
+    The provision step creates the fake-ypserver container
+    ``CN=ypServ30,CN=RpcServices,CN=System,<domaindn>`` only with that option,
+    so its existence is the reliable, LDAP-queryable indicator. Shared by the
+    user and group I/O layers, it is a single base-scoped existence search and is
+    only ever called when a POSIX attribute was actually requested.
+    """
+    dn = parse_dn(samdb, "CN=ypServ30,CN=RpcServices,CN=System,%s" % samdb.domain_dn())
+    return dn_exists(samdb, dn)

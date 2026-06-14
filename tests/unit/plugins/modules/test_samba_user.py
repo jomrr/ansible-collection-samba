@@ -18,13 +18,18 @@ from ansible_collections.jomrr.samba.plugins.modules import samba_user
 class FakeIO:
     """Records calls and simulates a user store; no samba required."""
 
-    def __init__(self, current=None):
+    def __init__(self, current=None, provisioned=True):
         self.current = current
+        self.provisioned = provisioned
         self.calls = []
 
     def read_current(self, username):
         self.calls.append(("read_current", username))
         return self.current
+
+    def rfc2307_provisioned(self):
+        self.calls.append(("rfc2307_provisioned",))
+        return self.provisioned
 
     def create_user(self, username, password):
         self.calls.append(("create_user", username, password))
@@ -272,6 +277,60 @@ def test_always_without_password_does_not_write():
     )
     assert result["changed"] is False
     assert "set_password" not in call_names(fake)
+
+
+# --- RFC2307/POSIX attributes ---
+
+def test_posix_attrs_create_writes():
+    fake = FakeIO(current=None)
+    result = logic.run(
+        make_params(uid_number=10001, gid_number=10000, login_shell="/bin/bash", password="S3cret!"),
+        False, fake,
+    )
+    assert result["changed"] is True
+    applied = [call[2] for call in fake.calls if call[0] == "apply_attrs"][0]
+    assert applied["uid_number"] == 10001
+    assert applied["login_shell"] == "/bin/bash"
+    assert result["user"]["uid_number"] == 10001
+
+
+def test_posix_modify_writes():
+    fake = FakeIO(current=existing_user(uid_number=500))
+    result = logic.run(make_params(uid_number=10001), False, fake)
+    assert result["changed"] is True
+    assert ("apply_attrs", "CN=jdoe,CN=Users,DC=example,DC=com", {"uid_number": 10001}) in fake.calls
+
+
+def test_posix_idempotent_integer_no_write():
+    fake = FakeIO(current=existing_user(uid_number=10001, gid_number=10000))
+    result = logic.run(make_params(uid_number=10001, gid_number=10000), False, fake)
+    assert result["changed"] is False
+    assert "apply_attrs" not in call_names(fake)
+
+
+def test_posix_refused_without_rfc2307_before_any_write():
+    fake = FakeIO(current=existing_user(), provisioned=False)
+    with pytest.raises(logic.SambaUserError):
+        logic.run(make_params(uid_number=10001), False, fake)
+    assert "apply_attrs" not in call_names(fake)
+
+
+def test_posix_negative_integer_fails():
+    fake = FakeIO(current=existing_user(), provisioned=True)
+    with pytest.raises(logic.SambaUserError):
+        logic.run(make_params(uid_number=-1), False, fake)
+    assert "apply_attrs" not in call_names(fake)
+
+
+def test_non_posix_run_on_non_rfc2307_domain_is_unaffected():
+    # The non-negotiable negative test: no POSIX attribute set -> the
+    # provisioning state is never probed and a normal change goes through on a
+    # non-rfc2307 domain, exactly as before this feature.
+    fake = FakeIO(current=existing_user(given_name="Old"), provisioned=False)
+    result = logic.run(make_params(given_name="New"), False, fake)
+    assert result["changed"] is True
+    assert "apply_attrs" in call_names(fake)
+    assert "rfc2307_provisioned" not in call_names(fake)
 
 
 class _MovingIO(FakeIO):
