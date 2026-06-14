@@ -1,0 +1,3 @@
+---
+minor_changes:
+  - New module samba_join_member to join a host to an existing domain as a Samba AD member server (state=present only; runs locally on the joining host; binary idempotency via net ads testjoin; requires a pre-configured smb.conf with server role = member server).

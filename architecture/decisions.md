@@ -323,6 +323,16 @@ bindings exist for most of it; only the sssd backend is genuinely CLI-only:
   `do_join()`/`join_finalise()`). This is the binding behind `samba-tool domain
   join <realm> DC`, analogous to `provision()`. Consistent with the Samba
   Backend decision; lazy-imported.
+  - **Verified mechanism quirk (`netbios_name` is effectively required).**
+    Although `netbios_name` looks optional in the signature, `DCJoinContext`
+    runs its entire SPN/DN setup only inside `if netbios_name:`; passing `None`
+    or an empty value leaves `ctx.SPNs` unset, so `do_join()` later crashes with
+    `'DCJoinContext' object has no attribute 'SPNs'`. `samba-tool` always derives
+    one. Consequence: the module derives the NetBIOS name from loadparm/the
+    hostname (`lp.get("netbios name")`, the same default `samba-tool` uses) when
+    the caller omits it, and never passes `None` to `join_DC()`. Surfaced only by
+    the live multi-host Molecule join — mocked units, which stub `join_DC`, could
+    not see it.
 - **samba_join_member (winbind) - bindings.** The standard AD member join is
   `samba.net_s3.Net(creds, s3_lp, server).join_member(dnshostname, createupn,
   createcomputer, osName, osVer, osServicePack, machinepass)` - the source3
@@ -363,8 +373,12 @@ that the join is fully backend-independent is therefore only half true.
   differs from the target -> this host is already a DC of a *different* domain ->
   clear error, never re-join. (This dissolves the provision-vs-join ambiguity:
   the module ensures "this host is a DC of the target domain"; an existing
-  matching DC is the no-op. *Empirically to confirm: that the local DC's domain
-  identity is reliably readable to compare against the target.*)
+  matching DC is the no-op. **Empirically confirmed** by the live multi-host
+  Molecule test: the local DC's domain identity is reliably readable and
+  comparable to the target — the replication proof (a `repltest` user seeded on
+  the existing DC and found in the joiner's replica) passed on all four joiner
+  distros, the second run was an idempotent no-op, and the foreign-domain refusal
+  fired live.)
 - **samba_join_member / client `backend=winbind`:** `net ads testjoin`
   (`rc == 0` = the machine account is valid against the domain) is the robust
   discriminator; `secrets.tdb` presence is the weaker fallback. (`testjoin` has
@@ -393,6 +407,15 @@ that the join is fully backend-independent is therefore only half true.
   `samba.net_s3`, `samba.credentials`, `samba.param`) like `samba_conn`; the
   adcli/net paths are subprocesses whose only safety concern is credential
   handling (above), not the sanity-container import constraint.
+- **Lesson for the member/client modules (optional-vs-required parameters).**
+  The `netbios_name` finding above generalises: a Samba join binding can declare
+  a parameter optional in its signature yet trip over `None` internally (here the
+  whole SPN/DN setup is gated on it). For `net_s3.join_member` and the adcli path,
+  verify per-parameter whether "optional" really means optional or whether the
+  binding expects the value `samba-tool` always supplies (e.g. `dnshostname`,
+  `machinepass`), and derive a sane default in the module rather than forward
+  `None`. This class of bug is caught only by a live join, not by mocked units
+  that stub the binding — so each join module needs its own live Molecule pass.
 
 ### Status
 
