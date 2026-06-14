@@ -23,15 +23,86 @@ mode.
 
 ## Requirements
 
-- **Controller / target host:** the modules run on a Samba AD DC host that has
-  the `samba` Python bindings (`python3-samba`) installed; they talk to the
-  directory through those bindings.
+- **`python3-samba` on the executing host.** The modules use the native Samba
+  Python bindings (`samba.samdb.SamDB` is the bindings class, not a generic LDAP
+  client), so the host that *runs* the module must have `python3-samba`
+  installed. Which host that is depends on the execution topology (see below):
+  the DC itself in the preferred setup, or the Ansible controller when running
+  against a remote DC. Without the bindings the module fails with
+  `missing_required_lib`.
+- **Kerberos / GSSAPI:** the executing host must be able to obtain a Kerberos
+  ticket for the DC's realm — working DNS/SRV resolution to the DC, a matching
+  `krb5.conf`, and synchronised clocks (clock skew breaks Kerberos).
 - **ansible-core:** `>= 2.19.0` (see `meta/runtime.yml`).
 - **RFC2307/POSIX attributes** (`uid_number`, `gid_number`,
   `unix_home_directory`, `login_shell`, `gecos` on `samba_user`; `gid_number`
   on `samba_group`) require a domain provisioned with `--use-rfc2307`. Setting
   any of them on a domain without RFC2307 fails before any change is made; not
   setting them leaves such domains entirely unaffected.
+
+## Execution topology
+
+The modules reach the DC over the network — a GSSAPI sign+seal `ldap://`
+connection, and for `samba_dns_zone` additionally a `dnsserver` RPC — and have
+no DC-local dependency. Two topologies are supported.
+
+### Preferred — run on the DC (loopback)
+
+Run the module on the domain controller itself and point `server` at that same
+DC, so the connection goes over loopback:
+
+```yaml
+- name: Manage the DC from the DC itself
+  hosts: dc1.example.com          # the domain controller
+  module_defaults:
+    group/jomrr.samba.all:
+      server: dc1.example.com     # the same DC, reached over loopback
+      bind_username: Administrator
+      bind_password: "{{ vault_dc_admin_password }}"
+      realm: EXAMPLE.COM
+  tasks: []                       # your jomrr.samba.* tasks here
+```
+
+This is the topology the integration tests cover end to end across all supported
+distributions: the sealed LDAP connection and the DNS-zone RPC both run over
+loopback, with no firewall and no RPC endpoint-mapper detour — the fewest moving
+parts and the highest chance of success. `python3-samba` is already present on a
+DC.
+
+### Also supported — run from the controller against a remote DC
+
+Run the module on the Ansible controller (`hosts: localhost`) and point `server`
+at the remote DC's FQDN:
+
+```yaml
+- name: Manage a remote DC from the controller
+  hosts: localhost
+  module_defaults:
+    group/jomrr.samba.all:
+      server: dc1.example.com     # a remote DC, reached over the network
+      bind_username: Administrator
+      bind_password: "{{ vault_dc_admin_password }}"
+      realm: EXAMPLE.COM
+  tasks: []                       # your jomrr.samba.* tasks here
+```
+
+Every operation runs over network paths (`ldap://` or the TCP RPC), so the code
+fully supports this. It adds requirements on the controller:
+
+- **`python3-samba` must be installed on the controller** — it is the host that
+  runs the module. A controller version close to the DC's Samba version is
+  advisable for the DNS-zone RPC IDL; plain LDAP is more version-tolerant.
+- **Kerberos must resolve from the controller to the DC** (DNS/SRV records, a
+  correct `krb5.conf`) and clocks must be in sync.
+- **DNS-zone management needs more than port 389.** `samba_dns_zone` uses the
+  `dnsserver` RPC over `ncacn_ip_tcp`, which needs the RPC endpoint mapper plus
+  dynamically assigned ports reachable through any firewall between controller
+  and DC. The other modules (users, groups, OUs, DNS records) use only the
+  single sealed LDAP port 389. If a firewall sits between controller and DC,
+  this RPC is the part to open for zone management.
+
+The connection options below are the same in both topologies; only `hosts` and
+the `server` value differ.
 
 ## Connection setup
 
@@ -62,10 +133,10 @@ task:
 
 ```yaml
 - name: Manage the Samba AD DC
-  hosts: dc
+  hosts: dc1.example.com           # run on the DC (preferred; see Execution topology)
   module_defaults:
     group/jomrr.samba.all:
-      server: dc1.example.com
+      server: dc1.example.com      # the same DC, over loopback
       bind_username: Administrator
       bind_password: "{{ vault_dc_admin_password }}"   # from Ansible Vault
       realm: EXAMPLE.COM
@@ -100,10 +171,10 @@ Create a forward DNS zone and a record in it:
 
 ```yaml
 - name: DNS zone and record
-  hosts: dc
+  hosts: dc1.example.com           # run on the DC (preferred; see Execution topology)
   module_defaults:
     group/jomrr.samba.all:
-      server: dc1.example.com
+      server: dc1.example.com      # the same DC, over loopback
       bind_username: Administrator
       bind_password: "{{ vault_dc_admin_password }}"
       realm: EXAMPLE.COM
