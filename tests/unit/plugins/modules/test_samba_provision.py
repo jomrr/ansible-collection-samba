@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_local
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_provision_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_provision
 
@@ -118,45 +119,28 @@ def test_io_provision_failure_is_clean_error(monkeypatch):
         })
 
 
+# read_state delegates to the shared samba_local helper; these confirm the
+# delegation (the helper's own open logic is covered by test_samba_local).
 def test_io_read_state_not_provisioned(monkeypatch):
-    _patch_imports(monkeypatch, {"samba.param": FakeParam})
-    monkeypatch.setattr(samba_provision.os.path, "exists", lambda path: False)
+    monkeypatch.setattr(samba_local, "read_local_domain", lambda: None)
     assert samba_provision.SambaProvisionIO(module=None).read_state() is None
 
 
 def test_io_read_state_provisioned(monkeypatch):
-    class FakeSamDB:
-        def __init__(self, url, session_info, lp):
-            self.url = url
-
-        def domain_dn(self):
-            return "DC=samdom,DC=example,DC=com"
-
-        def get_domain_sid(self):
-            return "S-1-5-21-9-9-9"
-
-    class FakeSamdbMod:
-        SamDB = FakeSamDB
-
-    _patch_imports(monkeypatch, {
-        "samba.param": FakeParam, "samba.auth": FakeAuth, "samba.samdb": FakeSamdbMod,
+    monkeypatch.setattr(samba_local, "read_local_domain", lambda: {
+        "domaindn": "DC=samdom,DC=example,DC=com",
+        "domainsid": "S-1-5-21-9-9-9",
+        "dnsdomain": "samdom.example.com",
     })
-    monkeypatch.setattr(samba_provision.os.path, "exists", lambda path: True)
     state = samba_provision.SambaProvisionIO(module=None).read_state()
+    # read_state surfaces only the non-secret identity it documents (no dnsdomain).
     assert state == {"domaindn": "DC=samdom,DC=example,DC=com", "domainsid": "S-1-5-21-9-9-9"}
 
 
 def test_io_read_state_broken_raises(monkeypatch):
-    class BoomSamDB:
-        def __init__(self, url, session_info, lp):
-            raise RuntimeError("unable to open tdb: corrupt")
+    def boom():
+        raise samba_local.LocalSamdbError("a Samba database exists but is broken")
 
-    class FakeSamdbMod:
-        SamDB = BoomSamDB
-
-    _patch_imports(monkeypatch, {
-        "samba.param": FakeParam, "samba.auth": FakeAuth, "samba.samdb": FakeSamdbMod,
-    })
-    monkeypatch.setattr(samba_provision.os.path, "exists", lambda path: True)
+    monkeypatch.setattr(samba_local, "read_local_domain", boom)
     with pytest.raises(logic.SambaProvisionError):
         samba_provision.SambaProvisionIO(module=None).read_state()

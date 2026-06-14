@@ -162,13 +162,13 @@ domain:
 
 import importlib
 import logging
-import os
 import traceback
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import fail_without_bindings
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_local
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_provision_logic as logic
 
 
@@ -196,29 +196,18 @@ class SambaProvisionIO:
     def read_state(self):
         """Return the existing DC's non-secret identity, or None if not provisioned.
 
-        The ``sam.ldb`` path comes from ``lp.private_path`` (it respects the
-        smb.conf private dir and is not hardcoded). A missing file means "not
-        provisioned"; a file that exists but cannot be opened as an AD DC means a
-        partial/broken install and is reported as a clear error, never a silent
-        re-provision.
+        Delegates the local ``sam.ldb`` open to the shared ``samba_local`` helper
+        (also used by samba_join_dc). A missing database means "not provisioned";
+        a present-but-unopenable one is a partial/broken install and is reported
+        as a clear error, never a silent re-provision.
         """
-        load_parm = self._load_parm()
-        path = load_parm.private_path("sam.ldb")
-        if not os.path.exists(path):
-            return None
-        auth = importlib.import_module("samba.auth")
-        samdb_mod = importlib.import_module("samba.samdb")
         try:
-            samdb = samdb_mod.SamDB(url=path, session_info=auth.system_session(), lp=load_parm)
-            domaindn = samdb.domain_dn()
-            domainsid = str(samdb.get_domain_sid())
-        except Exception as exc:
-            raise logic.SambaProvisionError(
-                "a Samba database exists at '%s' but could not be opened as an AD "
-                "DC; the host appears partially provisioned or corrupt: %s"
-                % (path, to_native(exc))
-            )
-        return {"domaindn": domaindn, "domainsid": domainsid}
+            domain = samba_local.read_local_domain()
+        except samba_local.LocalSamdbError as exc:
+            raise logic.SambaProvisionError(to_native(exc))
+        if domain is None:
+            return None
+        return {"domaindn": domain["domaindn"], "domainsid": domain["domainsid"]}
 
     def provision(self, params):
         """Provision the local host as a DC and return its non-secret identity.
