@@ -40,6 +40,42 @@ def public_state(name, replication, present):
     return {"name": name, "state": "present", "replication": replication}
 
 
+#: Reverse-lookup zone suffixes (a zone under these is a reverse zone).
+_REVERSE_SUFFIXES = (".in-addr.arpa", ".ip6.arpa")
+
+
+def is_reverse(name):
+    """True if ``name`` is a reverse-lookup zone (under in-addr.arpa/ip6.arpa)."""
+    lowered = name.lower()
+    return any(lowered.endswith(suffix) for suffix in _REVERSE_SUFFIXES)
+
+
+def decode_replication(zone_dn):
+    """Derive the replication scope from the zone's directory partition.
+
+    Read mirror of ``create_zone``'s partition selection: a zone held in the
+    ForestDnsZones application partition is forest-replicated; every other
+    location (the DomainDnsZones partition, or the legacy domain location) is
+    domain-replicated.
+    """
+    return "forest" if "forestdnszones" in zone_dn.lower() else "domain"
+
+
+def zone_info(name, zone_dn):
+    """Return the read-only public state for one observed zone.
+
+    ``replication`` (from the partition) and ``reverse`` (from the name) are
+    derived so the fields line up with what ``samba_dns_zone`` accepts as input -
+    the read mirror of that module's write parameters.
+    """
+    return {
+        "name": name,
+        "replication": decode_replication(str(zone_dn)),
+        "reverse": is_reverse(name),
+        "dn": str(zone_dn),
+    }
+
+
 def build_diff(name, before_present, after_present):
     """Build a before/after diff of the zone's existence."""
     return {

@@ -130,6 +130,29 @@ def find_zone_dn(samdb, zone):
     return res[0].dn if len(res) > 0 else None
 
 
+def list_zone_entries(samdb, zone=None):
+    """Return ``(name, dn)`` for dnsZone objects across the DNS partitions.
+
+    With ``zone`` given, returns at most that one zone (escaped via
+    ``ldb.binary_encode`` before it enters the filter); otherwise every zone. The
+    phantom-root control reaches the DomainDnsZones/ForestDnsZones application
+    partitions - the same search ``find_zone_dn`` uses.
+    """
+    ldb = samba_user_io.load_ldb()
+    if zone is None:
+        expression = "(objectClass=dnsZone)"
+    else:
+        expression = "(&(objectClass=dnsZone)(name=%s))" % ldb.binary_encode(zone)
+    res = samdb.search(
+        base="",
+        scope=ldb.SCOPE_SUBTREE,
+        expression=expression,
+        attrs=["name"],
+        controls=["search_options:0:2"],
+    )
+    return [(samba_user_io.first_value(message, "name"), message.dn) for message in res]
+
+
 def read_node_specs(samdb, node_dn):
     """Return the managed record specs at ``node_dn``, or None if it is absent."""
     ldb = samba_user_io.load_ldb()

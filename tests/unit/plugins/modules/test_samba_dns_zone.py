@@ -164,3 +164,46 @@ def test_delete_race_already_gone_reports_unchanged():
     assert "delete" in call_names(fake)
     assert result["changed"] is False
     assert result["zone"]["state"] == "absent"
+
+
+# --- read-mirror helpers (used by samba_dns_zone_info) ---
+
+def test_decode_replication_domain_partition():
+    dn = "DC=example.com,CN=MicrosoftDNS,DC=DomainDnsZones,DC=example,DC=com"
+    assert logic.decode_replication(dn) == "domain"
+
+
+def test_decode_replication_forest_partition():
+    dn = "DC=forest.example.com,CN=MicrosoftDNS,DC=ForestDnsZones,DC=example,DC=com"
+    assert logic.decode_replication(dn) == "forest"
+
+
+def test_decode_replication_is_case_insensitive():
+    dn = "DC=z,CN=MicrosoftDNS,DC=forestdnszones,DC=example,DC=com"
+    assert logic.decode_replication(dn) == "forest"
+
+
+@pytest.mark.parametrize("name,reverse", [
+    ("example.com", False),
+    ("2.0.192.in-addr.arpa", True),
+    ("0.8.b.d.0.1.0.0.2.ip6.arpa", True),
+    ("FORWARD.EXAMPLE.COM", False),
+])
+def test_is_reverse(name, reverse):
+    assert logic.is_reverse(name) is reverse
+
+
+def test_zone_info_roundtrips_as_write_input():
+    # A returned zone's name + replication are exactly what samba_dns_zone takes
+    # as input (the read mirror of the write semantics; scope from the partition).
+    dn = "DC=2.0.192.in-addr.arpa,CN=MicrosoftDNS,DC=ForestDnsZones,DC=example,DC=com"
+    info = logic.zone_info("2.0.192.in-addr.arpa", dn)
+    assert info == {
+        "name": "2.0.192.in-addr.arpa",
+        "replication": "forest",
+        "reverse": True,
+        "dn": dn,
+    }
+    # name + replication line up with the write module's accepted parameters.
+    assert info["replication"] in logic.REPLICATION_CHOICES
+    assert logic.validate({"name": info["name"]}) == info["name"]

@@ -13,3 +13,4 @@ action_groups:
     - samba_dns_record
     - samba_dns_record_info
     - samba_dns_zone
+    - samba_dns_zone_info
