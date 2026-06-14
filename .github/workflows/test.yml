@@ -1,0 +1,99 @@
+---
+# Reusable workflow: the fast feedback gates (sanity, units, ansible-lint).
+# Called by both dev.yml (PRs and feature branches) and main.yml (push to main),
+# so the gate definitions live in exactly one place.
+#
+# The collection must live at ansible_collections/<namespace>/<name> for
+# ansible-test to detect it, so every job checks out into that path and runs
+# from there. CI runners ship real Docker, so ansible-test uses --docker
+# directly (the ANSIBLE_TEST_PREFER_PODMAN override is only needed on the
+# Podman-based dev host); Molecule, which needs Podman, lives in main.yml.
+name: test
+
+"on":
+  workflow_call:
+
+env:
+  COLLECTION_PATH: ansible_collections/jomrr/samba
+
+jobs:
+  sanity:
+    name: Sanity (ansible-core ${{ matrix.ansible }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ansible:
+          - stable-2.20
+          - devel
+    continue-on-error: ${{ matrix.ansible == 'devel' }}
+    steps:
+      - name: Check out the collection
+        uses: actions/checkout@v5
+        with:
+          path: ${{ env.COLLECTION_PATH }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ansible-core (${{ matrix.ansible }})
+        run: >-
+          python -m pip install --disable-pip-version-check
+          https://github.com/ansible/ansible/archive/${{ matrix.ansible }}.tar.gz
+
+      - name: Run sanity tests
+        run: ansible-test sanity --docker --python 3.12 -v
+        working-directory: ${{ env.COLLECTION_PATH }}
+
+  units:
+    name: Units (ansible-core ${{ matrix.ansible }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ansible:
+          - stable-2.20
+          - devel
+    continue-on-error: ${{ matrix.ansible == 'devel' }}
+    steps:
+      - name: Check out the collection
+        uses: actions/checkout@v5
+        with:
+          path: ${{ env.COLLECTION_PATH }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ansible-core (${{ matrix.ansible }})
+        run: >-
+          python -m pip install --disable-pip-version-check
+          https://github.com/ansible/ansible/archive/${{ matrix.ansible }}.tar.gz
+
+      - name: Run unit tests
+        run: ansible-test units --docker --python 3.12 -v
+        working-directory: ${{ env.COLLECTION_PATH }}
+
+  lint:
+    name: ansible-lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the collection
+        uses: actions/checkout@v5
+        with:
+          path: ${{ env.COLLECTION_PATH }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ansible-lint
+        run: python -m pip install --disable-pip-version-check ansible-lint
+
+      - name: Run ansible-lint (profile production)
+        run: ansible-lint
+        working-directory: ${{ env.COLLECTION_PATH }}

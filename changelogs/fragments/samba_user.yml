@@ -1,3 +1,0 @@
----
-minor_changes:
-  - samba_user - new module to manage users (create, modify, remove, enable/disable) in a Samba AD DC via the native Python bindings.

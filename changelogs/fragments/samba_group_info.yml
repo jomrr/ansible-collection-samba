@@ -1,3 +1,0 @@
----
-minor_changes:
-  - New module samba_group_info to query groups from a Samba AD DC.

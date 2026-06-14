@@ -1,3 +1,0 @@
----
-minor_changes:
-  - New module samba_group to manage groups (scope, category, members) in a Samba AD DC.

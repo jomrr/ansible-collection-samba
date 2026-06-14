@@ -1,5 +1,0 @@
----
-trivial:
-  - >-
-    Initial collection scaffold with the samba connection helper in
-    ``module_utils`` and wired-up test gates.

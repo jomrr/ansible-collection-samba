@@ -1,0 +1,74 @@
+---
+# Main workflow: the full validation. Runs on push to main, on release tags
+# (v*), and on pull requests targeting main (e.g. the dev->main release PR). The
+# fast gates (via the reusable test.yml) run on all three; the full Molecule
+# integration matrix runs only on push and tags, not on pull requests, so the
+# dev->main PR gets a fast pre-merge check without paying for four DC runs.
+name: main
+
+"on":
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  # Reuse the exact same sanity/units/lint definition as the dev workflow.
+  test:
+    uses: ./.github/workflows/test.yml
+
+  molecule:
+    name: Molecule (integration, four-distro matrix)
+    needs: test
+    # Branch pushes to main and tag pushes (v*) are both event_name 'push';
+    # pull_request events are not, so Molecule is skipped on PRs.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      # Resolve both the collection under test (checked out below) and the
+      # containers.podman collection the Molecule podman driver needs, from one
+      # path. ansible-test layout requires ansible_collections/<ns>/<name>.
+      COLLECTION_PATH: ansible_collections/jomrr/samba
+      ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}
+      ANSIBLE_FORCE_COLOR: "1"
+    steps:
+      - name: Check out the collection
+        uses: actions/checkout@v5
+        with:
+          path: ansible_collections/jomrr/samba
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Raise inotify limits for the multi-DC container run
+        # The four DCs run Samba as a plain daemon (not systemd-PID1), so their
+        # inotify footprint is modest, but raise the limits to give the matrix
+        # headroom on a shared runner kernel.
+        run: |
+          sudo sysctl -w fs.inotify.max_user_instances=512
+          sudo sysctl -w fs.inotify.max_user_watches=524288
+
+      - name: Show the container engine
+        run: podman version
+
+      - name: Install Molecule, ansible-core and the Podman driver
+        run: >-
+          python -m pip install --disable-pip-version-check
+          "ansible-core>=2.19" molecule "molecule-plugins[podman]"
+
+      - name: Install the Podman driver's collection dependency
+        # The Molecule podman driver's playbooks use containers.podman.
+        # Install it beside the collection for ANSIBLE_COLLECTIONS_PATH.
+        run: >-
+          ansible-galaxy collection install containers.podman
+          -p "${{ github.workspace }}"
+
+      - name: Run Molecule (all four distros)
+        run: molecule test
+        working-directory: ${{ env.COLLECTION_PATH }}

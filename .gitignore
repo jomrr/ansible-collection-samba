@@ -2,6 +2,10 @@
 .ansible/
 tests/output/
 
+# Built collection artifacts
+dist/
+*.tar.gz
+
 # Python artifacts
 __pycache__/
 *.pyc

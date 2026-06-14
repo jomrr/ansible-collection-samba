@@ -1,3 +1,0 @@
----
-minor_changes:
-  - New module samba_dns_zone_info to query DNS zones from a Samba AD DC.

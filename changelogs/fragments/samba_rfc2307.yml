@@ -1,3 +1,0 @@
----
-minor_changes:
-  - samba_user and samba_group - add RFC2307/POSIX attributes (uidNumber, gidNumber, unixHomeDirectory, loginShell, gecos); samba_user_info and samba_group_info return them.

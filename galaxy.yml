@@ -21,6 +21,19 @@ documentation: https://github.com/jomrr/ansible-collection-samba#readme
 homepage: https://github.com/jomrr/ansible-collection-samba
 issues: https://github.com/jomrr/ansible-collection-samba/issues
 build_ignore:
+  # development-only directories and files, not shipped in the release artifact
   - extensions/molecule
-  - .ansible-lint
   - architecture
+  - .ansible-lint
+  - .github
+  - .ansible
+  - .claude
+  - .gitignore
+  - CLAUDE.md
+  - dist
+  - "*.tar.gz"
+  - .mypy_cache
+  - "*/.mypy_cache"
+  - .pytest_cache
+  - "*/.pytest_cache"
+  - tests/output

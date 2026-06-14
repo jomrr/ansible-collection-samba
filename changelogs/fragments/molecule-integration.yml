@@ -1,7 +1,0 @@
----
-trivial:
-  - >-
-    Add a Molecule integration suite that provisions a real Samba AD DC across
-    Debian, Fedora, openSUSE Tumbleweed and Ubuntu (rootless podman, no
-    systemd) and exercises samba_user, samba_user_info, samba_group and
-    samba_group_info end to end, including an idempotence run.

@@ -1,3 +1,0 @@
----
-minor_changes:
-  - New module samba_ou_info to query organizational units from a Samba AD DC.

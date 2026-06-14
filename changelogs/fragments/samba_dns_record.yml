@@ -1,3 +1,0 @@
----
-minor_changes:
-  - New module samba_dns_record to manage DNS records (A, AAAA, CNAME, PTR, MX, TXT, SRV, NS) in a Samba AD DC.
