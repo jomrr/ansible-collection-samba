@@ -57,6 +57,13 @@ fixture) so Samba can write native `security.NTACL` xattrs.
   `python3xx-cryptography` explicitly; readiness is gated on a local
   `samba-tool user list` (one samba-tool build rejects an explicit
   `127.0.0.1`).
+- **openSUSE MIT KDC**: openSUSE builds samba against the MIT Kerberos KDC, so
+  the `samba` AD DC daemon execs `/usr/sbin/krb5kdc`; without `krb5-server` that
+  child fails and `samba_terminate` takes the whole daemon down. The local LDB
+  still answers (so the `user list` gate passes), which is why a second readiness
+  gate queries the DNS RPC (`samba-tool dns`) - it surfaces this and any other
+  failed daemon child fast. `krb5-server` and `samba-winbind` are therefore in
+  the openSUSE package set. The other distros use the in-tree Heimdal KDC.
 
 ### Consequences
 

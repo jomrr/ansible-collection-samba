@@ -217,3 +217,68 @@
         that:
           - _gplaced.groups[0].dn | lower is search('ou=loc_a')
           - _gmover.groups[0].dn | lower is search('ou=loc_b')
+
+    # DNS records are verified independently through samba-tool's dnsserver RPC
+    # query, not the local-SamDB path the module writes through (the DC's RPC
+    # readiness is gated in prepare.yml). The admin password is passed via the
+    # PASSWD environment variable that samba's credential code reads, so it never
+    # appears on the command line or in a registered result.
+    - name: Verify | Query each created DNS record
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - dns
+          - query
+          - "{{ samba_fqdn }}"
+          - "{{ samba_dns_zone }}"
+          - "{{ item.name }}"
+          - "{{ item.type }}"
+          - "--username=Administrator"
+      environment:
+        PASSWD: "{{ samba_admin_password }}"
+      register: _dns_present
+      changed_when: false
+      failed_when: false
+      loop:
+        - {name: www, type: A, expect: "192.0.2.10"}
+        # samba-tool renders AAAA fully expanded, not compressed.
+        - {name: www, type: AAAA, expect: "2001:0db8:0000:0000:0000:0000:0000:0010"}
+        - {name: ftp, type: CNAME, expect: "www"}
+        - {name: "@", type: MX, expect: "mail"}
+        - {name: "@", type: TXT, expect: "v=spf1"}
+        - {name: _sip._tcp, type: SRV, expect: "5060"}
+        - {name: ptrtest, type: PTR, expect: "host"}
+        - {name: deleg, type: NS, expect: "ns1"}
+      loop_control:
+        label: "{{ item.name }} {{ item.type }}"
+
+    - name: Verify | Each created DNS record resolves with the expected value
+      ansible.builtin.assert:
+        that:
+          - item.rc == 0
+          - item.item.expect in item.stdout
+      loop: "{{ _dns_present.results }}"
+      loop_control:
+        label: "{{ item.item.name }} {{ item.item.type }}"
+
+    - name: Verify | Query the removed DNS record
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - dns
+          - query
+          - "{{ samba_fqdn }}"
+          - "{{ samba_dns_zone }}"
+          - dnsdel
+          - A
+          - "--username=Administrator"
+      environment:
+        PASSWD: "{{ samba_admin_password }}"
+      register: _dns_removed
+      changed_when: false
+      failed_when: false
+
+    - name: Verify | The removed DNS record is gone
+      ansible.builtin.assert:
+        that:
+          - _dns_removed.rc != 0

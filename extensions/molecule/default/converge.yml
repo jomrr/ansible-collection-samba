@@ -186,3 +186,87 @@
         members:
           - jane
         state: present
+
+    - name: Converge | Create an A record
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: www
+        type: A
+        value: 192.0.2.10
+        state: present
+
+    - name: Converge | Create an AAAA record
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: www
+        type: AAAA
+        value: 2001:db8::10
+        state: present
+
+    - name: Converge | Create a CNAME record
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: ftp
+        type: CNAME
+        value: "www.{{ samba_dns_zone }}"
+        state: present
+
+    - name: Converge | Create an MX record at the apex
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: "@"
+        type: MX
+        value: "mail.{{ samba_dns_zone }}"
+        preference: 10
+        state: present
+
+    - name: Converge | Create a TXT record at the apex
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: "@"
+        type: TXT
+        value: "v=spf1 -all"
+        state: present
+
+    - name: Converge | Create an SRV record
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: _sip._tcp
+        type: SRV
+        value: "sip.{{ samba_dns_zone }}"
+        priority: 0
+        weight: 100
+        port: 5060
+        state: present
+
+    - name: Converge | Create a PTR record
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: ptrtest
+        type: PTR
+        value: "host.{{ samba_dns_zone }}"
+        state: present
+
+    - name: Converge | Create an NS delegation record
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: deleg
+        type: NS
+        value: "ns1.{{ samba_dns_zone }}"
+        state: present
+
+    - name: Converge | Remove a seeded DNS record
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: dnsdel
+        type: A
+        value: 192.0.2.99
+        state: absent
+
+    - name: Converge | Absent on a non-existent DNS record is a no-op
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: ghostdns
+        type: A
+        value: 192.0.2.200
+        state: absent
