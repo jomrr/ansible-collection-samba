@@ -42,6 +42,7 @@ jobs:
           - default
           - provision
           - join_dc
+          - join_member
     env:
       # Resolve both the collection under test (checked out below) and the
       # containers.podman collection the Molecule podman driver needs, from one

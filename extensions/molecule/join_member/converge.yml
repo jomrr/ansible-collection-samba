@@ -1,0 +1,19 @@
+---
+# Join each member to its pair's existing DC with samba_join_member. Runs ONLY on
+# the member hosts; the DC hosts were set up in prepare and are untouched here.
+# The join uses the role-provided smb.conf written in prepare (security=ads,
+# realm, workgroup) and writes the machine secret to secrets.tdb. Molecule's
+# idempotence step re-runs this and asserts the second run reports no changes (an
+# existing valid member is a no-op); verify.yml adds the joined-effect, check-mode
+# and the RFC2307 getent assertions.
+- name: Converge
+  hosts: member
+  gather_facts: false
+  tasks:
+    - name: Converge | Join the host to its domain as a member server
+      jomrr.samba.samba_join_member:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        state: present

@@ -1,0 +1,131 @@
+---
+# Verify samba_join_member produced a real member AND that the full
+# idmap-ad/RFC2307 chain works. Runs on the member hosts.
+#   - join effect + idempotency + check mode (the module's contract);
+#   - net ads testjoin confirms the machine account is valid;
+#   - winbind is brought up (FIXTURE) and then THE CORE PROOF: a user seeded on
+#     the DC with an explicit uidNumber resolves on the member, via idmap_ad,
+#     with EXACTLY that uidNumber (getent passwd) - and the seeded group with its
+#     exact gidNumber (getent group). That proves winbind reads the RFC2307
+#     uidNumber from AD instead of allocating its own id.
+- name: Verify
+  hosts: member
+  gather_facts: false
+  tasks:
+    # --- the module's contract (no daemon needed) ---
+    - name: Verify | A second samba_join_member run is an idempotent no-op
+      jomrr.samba.samba_join_member:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        state: present
+      register: _again
+
+    - name: Verify | The repeat run changed nothing and reports a member
+      ansible.builtin.assert:
+        that:
+          - _again is not changed
+          - _again.joined is true
+          - _again.domain.workgroup == samba_domain
+
+    - name: Verify | samba_join_member in check mode on a member is a no-op
+      # No bind_password is needed for an already-joined member: the state is read
+      # via net ads testjoin before any password is required.
+      jomrr.samba.samba_join_member:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        state: present
+      check_mode: true
+      register: _check
+
+    - name: Verify | Check mode reports no change on the member
+      ansible.builtin.assert:
+        that:
+          - _check is not changed
+          - _check.joined is true
+
+    - name: Verify | net ads testjoin confirms the machine account is valid
+      ansible.builtin.command:
+        argv:
+          - net
+          - ads
+          - testjoin
+      register: _testjoin
+      changed_when: false
+
+    - name: Verify | The join is valid (testjoin rc 0)
+      ansible.builtin.assert:
+        that:
+          - _testjoin.rc == 0
+
+    # --- winbind fixture: bring winbind up so nss_winbind can resolve ---
+    - name: Verify | Start the winbind daemon
+      ansible.builtin.command:
+        cmd: winbindd
+      changed_when: true
+
+    - name: Verify | Wait until the domain trust is established
+      ansible.builtin.command:
+        argv:
+          - wbinfo
+          - "-t"
+      register: _trust
+      until: _trust.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    # --- THE CORE PROOF: RFC2307 uidNumber/gidNumber resolve via idmap_ad ---
+    - name: Verify | Resolve the seeded user through nss/winbind
+      ansible.builtin.command:
+        argv:
+          - getent
+          - passwd
+          - "{{ samba_rfc_user }}"
+      register: _pw
+      changed_when: false
+
+    - name: Verify | The user resolves with EXACTLY its AD RFC2307 uidNumber
+      # getent passwd line: name:passwd:UID:GID:gecos:home:shell - field 3 is the
+      # uid, which must equal the uidNumber set on the DC (not a winbind-allocated
+      # id). This is the whole point of the scenario.
+      ansible.builtin.assert:
+        that:
+          - _pw.rc == 0
+          - _pw.stdout.split(':')[2] == samba_rfc_uid | string
+        success_msg: "idmap_ad resolved {{ samba_rfc_user }} to uid {{ samba_rfc_uid }} from AD"
+        fail_msg: "expected uid {{ samba_rfc_uid }}, got '{{ _pw.stdout }}'"
+
+    - name: Verify | Resolve the seeded group through nss/winbind
+      ansible.builtin.command:
+        argv:
+          - getent
+          - group
+          - "{{ samba_rfc_group }}"
+      register: _gr
+      changed_when: false
+
+    - name: Verify | The group resolves with EXACTLY its AD RFC2307 gidNumber
+      ansible.builtin.assert:
+        that:
+          - _gr.rc == 0
+          - _gr.stdout.split(':')[2] == samba_rfc_gid | string
+        success_msg: "idmap_ad resolved {{ samba_rfc_group }} to gid {{ samba_rfc_gid }} from AD"
+        fail_msg: "expected gid {{ samba_rfc_gid }}, got '{{ _gr.stdout }}'"
+
+    - name: Verify | wbinfo confirms the same uid (interop cross-check)
+      ansible.builtin.command:
+        argv:
+          - wbinfo
+          - "-i"
+          - "{{ samba_rfc_user }}"
+      register: _wb
+      changed_when: false
+
+    - name: Verify | wbinfo reports the AD RFC2307 uidNumber too
+      ansible.builtin.assert:
+        that:
+          - _wb.rc == 0
+          - _wb.stdout.split(':')[2] == samba_rfc_uid | string
