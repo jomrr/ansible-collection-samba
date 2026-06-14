@@ -223,17 +223,9 @@ class SambaDnsRecordIO:
         self._zone_dns = {}
 
     def _zone_dn(self, zone):
-        """Return the zone's DN (searched across the DNS partitions) or None."""
+        """Return the zone's DN (cached), or None if the zone does not exist."""
         if zone not in self._zone_dns:
-            ldb = samba_user_io.load_ldb()
-            res = self.samdb.search(
-                base="",
-                scope=ldb.SCOPE_SUBTREE,
-                expression="(&(objectClass=dnsZone)(name=%s))" % ldb.binary_encode(zone),
-                attrs=["name"],
-                controls=["search_options:0:2"],
-            )
-            self._zone_dns[zone] = res[0].dn if len(res) > 0 else None
+            self._zone_dns[zone] = samba_dns_io.find_zone_dn(self.samdb, zone)
         return self._zone_dns[zone]
 
     def _node_dn(self, zone, name):
@@ -260,17 +252,7 @@ class SambaDnsRecordIO:
 
     def read(self, zone, name):
         """Return the managed record specs at ``name``, or None if name is absent."""
-        raw = self._read_raw(self._node_dn(zone, name))
-        if raw is None:
-            return None
-        ndr = samba_dns_io.load_ndr()
-        dnsp = samba_dns_io.load_dnsp()
-        specs = []
-        for value in raw:
-            spec = samba_dns_io.record_to_spec(ndr.ndr_unpack(dnsp.DnssrvRpcRecord, value))
-            if spec is not None:
-                specs.append(spec)
-        return specs
+        return samba_dns_io.read_node_specs(self.samdb, self._node_dn(zone, name))
 
     def _live_records(self, raw):
         """Unpack raw values into records, dropping tombstones."""

@@ -1,0 +1,3 @@
+---
+minor_changes:
+  - New module samba_dns_record_info to query DNS records from a Samba AD DC.

@@ -218,67 +218,49 @@
           - _gplaced.groups[0].dn | lower is search('ou=loc_a')
           - _gmover.groups[0].dn | lower is search('ou=loc_b')
 
-    # DNS records are verified independently through samba-tool's dnsserver RPC
-    # query, not the local-SamDB path the module writes through (the DC's RPC
-    # readiness is gated in prepare.yml). The admin password is passed via the
-    # PASSWD environment variable that samba's credential code reads, so it never
-    # appears on the command line or in a registered result.
-    - name: Verify | Query each created DNS record
-      ansible.builtin.command:
-        argv:
-          - samba-tool
-          - dns
-          - query
-          - "{{ samba_fqdn }}"
-          - "{{ samba_dns_zone }}"
-          - "{{ item.name }}"
-          - "{{ item.type }}"
-          - "--username=Administrator"
-      environment:
-        PASSWD: "{{ samba_admin_password }}"
-      register: _dns_present
-      changed_when: false
-      failed_when: false
+    # DNS records are read back through samba_dns_record_info (the read mirror of
+    # samba_dns_record, same local-SamDB path). Values are asserted in the DC's
+    # stored/normalized form: AAAA fully expanded; CNAME/PTR/NS and the MX/SRV
+    # target compared trailing-dot-insensitively.
+    - name: Verify | Read back each created DNS record
+      jomrr.samba.samba_dns_record_info:
+        zone: "{{ samba_dns_zone }}"
+        name: "{{ item.name }}"
+        type: "{{ item.type }}"
+      register: _dnsinfo
       loop:
-        - {name: www, type: A, expect: "192.0.2.10"}
-        # samba-tool renders AAAA fully expanded, not compressed.
-        - {name: www, type: AAAA, expect: "2001:0db8:0000:0000:0000:0000:0000:0010"}
-        - {name: ftp, type: CNAME, expect: "www"}
-        - {name: "@", type: MX, expect: "mail"}
-        - {name: "@", type: TXT, expect: "v=spf1"}
-        - {name: _sip._tcp, type: SRV, expect: "5060"}
-        - {name: ptrtest, type: PTR, expect: "host"}
-        - {name: deleg, type: NS, expect: "ns1"}
+        - {name: www, type: A, value: "192.0.2.10"}
+        - {name: www, type: AAAA, value: "2001:0db8:0000:0000:0000:0000:0000:0010"}
+        - {name: ftp, type: CNAME, value: "www.{{ samba_dns_zone }}"}
+        - {name: "@", type: MX, value: "mail.{{ samba_dns_zone }}", preference: 10}
+        - {name: "@", type: TXT, value: "v=spf1 -all"}
+        - {name: _sip._tcp, type: SRV, value: "sip.{{ samba_dns_zone }}", priority: 0, weight: 100, port: 5060}
+        - {name: ptrtest, type: PTR, value: "host.{{ samba_dns_zone }}"}
+        - {name: deleg, type: NS, value: "ns1.{{ samba_dns_zone }}"}
       loop_control:
         label: "{{ item.name }} {{ item.type }}"
 
-    - name: Verify | Each created DNS record resolves with the expected value
+    - name: Verify | Each record is present with the expected normalized data
       ansible.builtin.assert:
         that:
-          - item.rc == 0
-          - item.item.expect in item.stdout
-      loop: "{{ _dns_present.results }}"
+          - item.records | length == 1
+          - item.records[0].value | regex_replace('\.$', '') == item.item.value
+          - item.item.preference is not defined or item.records[0].preference == item.item.preference
+          - item.item.priority is not defined or item.records[0].priority == item.item.priority
+          - item.item.weight is not defined or item.records[0].weight == item.item.weight
+          - item.item.port is not defined or item.records[0].port == item.item.port
+      loop: "{{ _dnsinfo.results }}"
       loop_control:
         label: "{{ item.item.name }} {{ item.item.type }}"
 
-    - name: Verify | Query the removed DNS record
-      ansible.builtin.command:
-        argv:
-          - samba-tool
-          - dns
-          - query
-          - "{{ samba_fqdn }}"
-          - "{{ samba_dns_zone }}"
-          - dnsdel
-          - A
-          - "--username=Administrator"
-      environment:
-        PASSWD: "{{ samba_admin_password }}"
+    - name: Verify | Read back the removed DNS record
+      jomrr.samba.samba_dns_record_info:
+        zone: "{{ samba_dns_zone }}"
+        name: dnsdel
+        type: A
       register: _dns_removed
-      changed_when: false
-      failed_when: false
 
     - name: Verify | The removed DNS record is gone
       ansible.builtin.assert:
         that:
-          - _dns_removed.rc != 0
+          - _dns_removed.records | length == 0

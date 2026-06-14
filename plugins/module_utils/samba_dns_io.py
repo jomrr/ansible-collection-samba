@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import importlib
 
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+
 #: Record types this module builds/extracts (the eight managed types).
 _MANAGED_TYPES = ["A", "AAAA", "CNAME", "PTR", "NS", "MX", "SRV", "TXT"]
 _NAME_DATA_TYPES = {"A", "AAAA", "CNAME", "PTR", "NS"}
@@ -108,3 +110,92 @@ def record_to_spec(rec):
     elif name == "TXT":
         spec["value"] = _TXT_SEP.join(str(s) for s in rec.data.str)
     return spec
+
+
+def find_zone_dn(samdb, zone):
+    """Return the DNS zone's DN, searched across the DNS partitions, or None.
+
+    The zone name is escaped via ``ldb.binary_encode`` before it enters the
+    search filter. The phantom-root control reaches the separate DNS application
+    partitions (DomainDnsZones/ForestDnsZones).
+    """
+    ldb = samba_user_io.load_ldb()
+    res = samdb.search(
+        base="",
+        scope=ldb.SCOPE_SUBTREE,
+        expression="(&(objectClass=dnsZone)(name=%s))" % ldb.binary_encode(zone),
+        attrs=["name"],
+        controls=["search_options:0:2"],
+    )
+    return res[0].dn if len(res) > 0 else None
+
+
+def read_node_specs(samdb, node_dn):
+    """Return the managed record specs at ``node_dn``, or None if it is absent."""
+    ldb = samba_user_io.load_ldb()
+    try:
+        res = samdb.search(base=node_dn, scope=ldb.SCOPE_BASE, attrs=["dnsRecord"])
+    except ldb.LdbError as err:
+        if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
+            return None
+        raise
+    if len(res) == 0:
+        return None
+    return _specs_from_element(res[0].get("dnsRecord"))
+
+
+def read_name_specs(samdb, zone_dn, name):
+    """Return the managed record specs for ``name`` in a zone, or None if absent.
+
+    The ``name`` is placed via ``ldb.Dn.set_component`` (in build_child_dn), so DN
+    metacharacters cannot inject extra components.
+    """
+    node_dn = samba_user_io.build_child_dn(samdb, "DC", name, zone_dn)
+    return read_node_specs(samdb, node_dn)
+
+
+def enumerate_zone_specs(samdb, zone_dn):
+    """Return ``(name, spec)`` for every managed record in the zone.
+
+    ``name`` is the record's name relative to the zone (``@`` for the apex,
+    dotted for nested nodes like ``_ldap._tcp``).
+    """
+    ldb = samba_user_io.load_ldb()
+    res = samdb.search(
+        base=zone_dn,
+        scope=ldb.SCOPE_SUBTREE,
+        expression="(&(objectClass=dnsNode)(!(dNSTombstoned=TRUE)))",
+        attrs=["dnsRecord"],
+    )
+    pairs = []
+    for message in res:
+        name = _relative_name(samdb, message.dn, zone_dn)
+        for spec in _specs_from_element(message.get("dnsRecord")):
+            pairs.append((name, spec))
+    return pairs
+
+
+def _specs_from_element(element):
+    """Decode a dnsRecord message element into a list of managed record specs."""
+    if element is None:
+        return []
+    ndr = load_ndr()
+    dnsp = load_dnsp()
+    specs = []
+    for value in element:
+        spec = record_to_spec(ndr.ndr_unpack(dnsp.DnssrvRpcRecord, value))
+        if spec is not None:
+            specs.append(spec)
+    return specs
+
+
+def _relative_name(samdb, node_dn, zone_dn):
+    """Return a dnsNode's DNS name relative to its zone (deepest label first)."""
+    ldb = samba_user_io.load_ldb()
+    relative = ldb.Dn(samdb, str(node_dn))
+    relative.remove_base_components(len(zone_dn))
+    labels = []
+    for index in range(len(relative)):
+        value = relative.get_component_value(index)
+        labels.append(value.decode() if isinstance(value, bytes) else value)
+    return ".".join(labels)
