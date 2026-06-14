@@ -1,0 +1,241 @@
+---
+# Prepare both roles of every DC+joiner pair. The DC side is provisioned with
+# samba-tool (NOT samba_provision - that module is tested in its own scenario;
+# here the DC is only the counterpart) and runs as a plain daemon. The joiner
+# side gets the multi-host network/DNS/Kerberos choreography that the single-host
+# scenarios never needed - it must resolve and authenticate to its DC across the
+# shared podman network - but is deliberately NOT joined: the join is the
+# converge test subject.
+#
+# Linear strategy (molecule default) runs each task to completion on all matching
+# hosts before the next, so all DC tasks finish before the joiner tasks begin;
+# the joiner never contacts its DC during prepare anyway (it only configures
+# reachability), so the actual cross-host contact happens in converge when the
+# DC is fully up.
+#
+# Clock skew between containers is a real multi-host concern, but rootless podman
+# containers share the host kernel clock, so skew is ~0 and well inside the
+# Kerberos tolerance; no time sync is set up. If a future runtime introduces skew
+# it must be fixed at the source (shared time), never by widening tolerance.
+- name: Prepare the DC+joiner pairs
+  hosts: all
+  gather_facts: false
+  vars:
+    _samba_packages:
+      Debian: [samba, samba-ad-dc, samba-ad-provision, samba-dsdb-modules, samba-vfs-modules, smbclient, winbind, python3-samba, ldb-tools, procps]
+      RedHat: [samba-dc, samba-common-tools, python3-samba, krb5-workstation, procps-ng]
+      Suse: [samba-ad-dc, samba-tool, samba-dsdb-modules, samba-client, samba-python3, python313-cryptography, krb5-client, krb5-server, samba-winbind]
+    target_dc_fqdn: "{{ target_dc | default('') }}.{{ samba_realm | lower }}"
+  tasks:
+    # --- common: bootstrap and packages (podman/aardvark DNS still in place, so
+    #     both the repos and the peer container names resolve) ---
+    - name: Prepare | Bootstrap python3 (stock base images ship none)
+      ansible.builtin.raw: >-
+        /bin/sh -c 'if command -v apt-get >/dev/null 2>&1; then
+        export DEBIAN_FRONTEND=noninteractive;
+        apt-get update -qq && apt-get install -y -qq python3;
+        elif command -v dnf >/dev/null 2>&1; then dnf install -y -q python3;
+        elif command -v zypper >/dev/null 2>&1; then
+        zypper --non-interactive --gpg-auto-import-keys install -y python3; fi'
+      changed_when: false
+
+    - name: Prepare | Gather facts now that python3 is present
+      ansible.builtin.setup:
+
+    - name: Prepare | Resolve this host's own IPv4 from the podman hosts entry
+      # Ansible's network facts (default_ipv4/all_ipv4_addresses) are unavailable
+      # here: the stock base images ship no iproute2 at gather time, so setup
+      # enumerates no addresses. podman writes the container's own name -> its real
+      # IP into /etc/hosts, so getent (glibc, always present) resolves it without
+      # any extra package or the default route the facts depend on.
+      ansible.builtin.command:
+        cmd: "getent ahostsv4 {{ inventory_hostname }}"
+      register: _own_ip_lookup
+      changed_when: false
+
+    - name: Prepare | Record this host's primary IPv4 on the pair network
+      ansible.builtin.set_fact:
+        _own_ipv4: "{{ _own_ip_lookup.stdout_lines[0].split()[0] }}"
+
+    - name: Prepare | Refresh apt cache (Debian family)
+      ansible.builtin.apt:
+        update_cache: true
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Prepare | Refresh zypper cache (Suse family)
+      ansible.builtin.command:
+        cmd: zypper --non-interactive --gpg-auto-import-keys refresh
+      changed_when: false
+      when: ansible_facts['os_family'] == "Suse"
+
+    - name: Prepare | Install Samba AD DC packages (both roles become a DC)
+      ansible.builtin.package:
+        name: "{{ _samba_packages[ansible_facts['os_family']] }}"
+        state: present
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+
+    - name: Prepare | Map this host's own FQDN to its real container IP
+      # Both roles need their own routable A record (not loopback): the DC
+      # advertises this IP to the joiner, and the joiner registers this IP when
+      # it joins. /etc/hosts is a podman bind-mount, so no atomic rename.
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ _own_ipv4 }} {{ samba_fqdn }} {{ inventory_hostname }}"
+        regexp: " {{ samba_fqdn }} "
+        state: present
+        unsafe_writes: true
+
+    - name: Prepare | Remove the stock smb.conf so provision/join start clean
+      ansible.builtin.file:
+        path: /etc/samba/smb.conf
+        state: absent
+
+    - name: Prepare | Constrain idmap xid range to fit the rootless user namespace
+      # Both roles become a DC and chown sysvol; the default s4 idmap range lies
+      # outside the rootless subordinate-id map, so low xids keep the chown inside
+      # the namespace. Test-fixture edit only.
+      ansible.builtin.replace:
+        path: /usr/share/samba/setup/idmap_init.ldif
+        regexp: "{{ item.regexp }}"
+        replace: "{{ item.replace }}"
+      loop:
+        - {regexp: '^lowerBound: .*', replace: 'lowerBound: 10000'}
+        - {regexp: '^upperBound: .*', replace: 'upperBound: 60000'}
+      loop_control:
+        label: "{{ item.replace }}"
+
+    # --- DC role: provision a real, running DC as the join counterpart ---
+    - name: Prepare | DC | Provision the Samba AD domain (this pair's realm)
+      ansible.builtin.command:
+        cmd: >-
+          samba-tool domain provision
+          --server-role=dc
+          --use-rfc2307
+          --dns-backend=SAMBA_INTERNAL
+          --realm={{ samba_realm }}
+          --domain={{ samba_domain }}
+          --adminpass={{ samba_admin_password }}
+          --host-ip={{ _own_ipv4 }}
+        creates: /var/lib/samba/private/sam.ldb
+      no_log: true
+      when: "'dc' in group_names"
+
+    - name: Prepare | DC | Install the generated krb5.conf before starting the daemon
+      ansible.builtin.copy:
+        src: /var/lib/samba/private/krb5.conf
+        dest: /etc/krb5.conf
+        remote_src: true
+        mode: "0644"
+      when: "'dc' in group_names"
+
+    - name: Prepare | DC | Start the Samba AD DC daemon
+      ansible.builtin.command:
+        cmd: samba --daemon
+      changed_when: true
+      when: "'dc' in group_names"
+
+    - name: Prepare | DC | Wait until the local directory is queryable
+      ansible.builtin.command:
+        cmd: samba-tool user list
+      register: _dc_ready
+      until: _dc_ready.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+      when: "'dc' in group_names"
+
+    - name: Prepare | DC | Point the DC resolver at its own internal DNS
+      ansible.builtin.copy:
+        content: "nameserver 127.0.0.1\n"
+        dest: /etc/resolv.conf
+        mode: "0644"
+        unsafe_writes: true
+      when: "'dc' in group_names"
+
+    - name: Prepare | DC | Wait until the DNS management RPC is serving
+      # Surfaces a failed daemon child (e.g. a broken KDC) fast, the way the
+      # other scenarios do; the join later relies on this DNS being authoritative.
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - dns
+          - query
+          - "{{ samba_fqdn }}"
+          - "{{ samba_realm | lower }}"
+          - "@"
+          - A
+          - "--username=Administrator"
+      environment:
+        PASSWD: "{{ samba_admin_password }}"
+      register: _dns_rpc_ready
+      until: _dns_rpc_ready.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+      when: "'dc' in group_names"
+
+    - name: Prepare | DC | Seed a user to later prove replication to the joiner
+      # Created on the FIRST DC only; the joiner must replicate it in during the
+      # join, which verify.yml asserts (proof of a real join, not a local fake).
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - user
+          - create
+          - repltest
+          - "{{ samba_admin_password }}"
+      changed_when: true
+      no_log: true
+      when: "'dc' in group_names"
+
+    # --- joiner role: reach the DC across the network, but do NOT join ---
+    - name: Prepare | Joiner | Resolve the DC's IP over the shared podman network
+      # aardvark-dns resolves the DC container name while the podman-provided
+      # resolv.conf is still in place (before it is repointed at the DC below).
+      ansible.builtin.command:
+        cmd: "getent ahostsv4 {{ target_dc }}"
+      register: _dc_lookup
+      changed_when: false
+      when: "'joiner' in group_names"
+
+    - name: Prepare | Joiner | Map the DC FQDN to its IP (bootstrap before DNS switch)
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ _dc_lookup.stdout_lines[0].split()[0] }} {{ target_dc_fqdn }} {{ target_dc }}"
+        regexp: " {{ target_dc_fqdn }} "
+        state: present
+        unsafe_writes: true
+      when: "'joiner' in group_names"
+
+    - name: Prepare | Joiner | Pin Kerberos to the DC (no SRV dependency)
+      # Explicit kdc/admin_server keeps the join robust if realm SRV/DNS is slow;
+      # resolv.conf below additionally points at the DC's authoritative DNS.
+      ansible.builtin.copy:
+        dest: /etc/krb5.conf
+        mode: "0644"
+        content: |
+          [libdefaults]
+              default_realm = {{ samba_realm }}
+              dns_lookup_realm = false
+              dns_lookup_kdc = false
+          [realms]
+              {{ samba_realm }} = {
+                  kdc = {{ target_dc_fqdn }}
+                  admin_server = {{ target_dc_fqdn }}
+              }
+          [domain_realm]
+              .{{ samba_realm | lower }} = {{ samba_realm }}
+              {{ samba_realm | lower }} = {{ samba_realm }}
+      when: "'joiner' in group_names"
+
+    - name: Prepare | Joiner | Point the resolver at the DC's authoritative DNS
+      # The DC serves the realm zone and forwards external names, so the joiner
+      # can resolve the realm (and reach repos) through it. Done last, after
+      # packages are installed over the podman resolver.
+      ansible.builtin.copy:
+        content: "nameserver {{ _dc_lookup.stdout_lines[0].split()[0] }}\n"
+        dest: /etc/resolv.conf
+        mode: "0644"
+        unsafe_writes: true
+      when: "'joiner' in group_names"

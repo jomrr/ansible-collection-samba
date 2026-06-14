@@ -47,6 +47,11 @@ class FakeLoadParm:
     def set(self, *args):
         pass
 
+    def get(self, key):
+        # Mirrors loadparm's derived default for an unset option (the host's
+        # NetBIOS name), used when the caller omits netbios_name.
+        return "DERIVEDNB" if key == "netbios name" else None
+
     def private_path(self, name):
         return "/var/lib/samba/private/" + name
 
@@ -133,6 +138,28 @@ def test_io_join_maps_parameters_and_uses_credentials(monkeypatch):
     # Only the non-secret identity is returned; no password.
     assert out == {"domaindn": "DC=samdom,DC=example,DC=com", "domainsid": "S-1-5-21-7"}
     assert "S3cret-Passw0rd!" not in repr(out)
+
+
+def test_io_join_derives_netbios_name_when_omitted(monkeypatch):
+    # join_DC() requires a netbios_name (its SPN/DN setup is guarded by it), so
+    # when the caller omits it the module must derive loadparm's default rather
+    # than pass None.
+    fake_join = FakeJoinMod()
+    fake_creds = FakeCredentialsMod()
+    monkeypatch.setattr(samba_join_dc.importlib, "import_module", lambda name: {
+        "samba.join": fake_join,
+        "samba.credentials": fake_creds,
+        "samba.param": FakeParam,
+    }[name])
+    monkeypatch.setattr(samba_local, "read_local_domain", lambda: {
+        "domaindn": "DC=samdom,DC=example,DC=com",
+        "domainsid": "S-1-5-21-7",
+        "dnsdomain": "samdom.example.com",
+    })
+
+    samba_join_dc.SambaJoinDcIO(module=None).join(_join_params(netbios_name=None))
+
+    assert fake_join.captured["netbios_name"] == "DERIVEDNB"
 
 
 def test_io_join_failure_is_clean_error(monkeypatch):

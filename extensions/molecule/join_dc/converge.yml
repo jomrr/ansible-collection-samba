@@ -1,0 +1,19 @@
+---
+# Join each joiner to its pair's existing DC with samba_join_dc. Runs ONLY on the
+# joiner hosts; the DC hosts were set up in prepare and are untouched here.
+# Molecule's idempotence step re-runs this whole playbook and asserts the second
+# run reports no changes (the binary-idempotency check: an existing matching DC
+# is a no-op); verify.yml adds the joined-effect, check-mode and foreign-domain
+# assertions.
+- name: Converge
+  hosts: joiner
+  gather_facts: false
+  tasks:
+    - name: Converge | Join the host to its domain as an additional DC
+      jomrr.samba.samba_join_dc:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        dns_backend: SAMBA_INTERNAL
+        state: present

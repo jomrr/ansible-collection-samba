@@ -1,0 +1,187 @@
+---
+# Verify samba_join_dc produced a real, functional, REPLICATED additional DC.
+# Runs on the joiner hosts. Levels mirror the provision scenario's depth:
+#   Level 1 (structural, daemon-less): open the joiner's local sam.ldb and assert
+#     its domain identity matches the target realm AND that the 'repltest' user -
+#     created on the FIRST DC in prepare - is present. Its presence proves the
+#     join really replicated the domain partition in, not merely created a local
+#     sam.ldb file.
+#   Level 2 (live interop): start the Samba daemon on the joined DC and exercise
+#     real object management with samba-tool (read the replicated user back, then
+#     create and read a new user), proving the joined DC is administrable.
+# In between, the explicit idempotency, check-mode and foreign-domain assertions
+# run while the host is still daemon-less.
+- name: Verify
+  hosts: joiner
+  gather_facts: false
+  vars:
+    _join_user: jointest
+    # A throwaway test password that meets the AD complexity policy.
+    _test_password: "T3st-Interop-Pw1!"
+    # A realm this host is NOT a DC of, for the destructive-protection test.
+    _foreign_realm: OTHER.EXAMPLE.COM
+    _foreign_server: dc.other.example.com
+  tasks:
+    # --- Level 1: structural, no daemon ---
+    - name: Verify | Drop a structural check script (local sam.ldb open)
+      ansible.builtin.copy:
+        dest: /root/verify_join.py
+        mode: "0644"
+        content: |
+          import sys
+          import ldb
+          from samba.samdb import SamDB
+          from samba.auth import system_session
+          from samba.param import LoadParm
+
+          expected_realm = sys.argv[1].lower()
+
+          lp = LoadParm()
+          lp.load_default()
+          samdb = SamDB(url=lp.private_path("sam.ldb"), session_info=system_session(), lp=lp)
+
+          domaindn = samdb.domain_dn()
+          sid = str(samdb.get_domain_sid())
+          dnsdomain = ".".join(c.split("=", 1)[1] for c in domaindn.split(",")).lower()
+
+          repl = samdb.search(base=domaindn, scope=ldb.SCOPE_SUBTREE,
+                              expression="(sAMAccountName=repltest)", attrs=["cn"])
+
+          assert dnsdomain == expected_realm, "realm mismatch: %s != %s" % (dnsdomain, expected_realm)
+          assert sid.startswith("S-1-5-21-"), "domain SID implausible: %s" % sid
+          assert len(repl) == 1, "replicated user 'repltest' missing - join did not replicate the domain"
+
+          print("JOIN_OK %s %s" % (domaindn, sid))
+
+    - name: Verify | Open the joiner's sam.ldb and assert a real, replicated domain
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /root/verify_join.py
+          - "{{ samba_realm }}"
+      changed_when: false
+      register: _struct
+
+    - name: Verify | The structural check confirmed a real, replicated join
+      ansible.builtin.assert:
+        that:
+          - "'JOIN_OK' in _struct.stdout"
+
+    # --- idempotency, check mode and destructive protection (still daemon-less) ---
+    - name: Verify | A second samba_join_dc run is an idempotent no-op
+      jomrr.samba.samba_join_dc:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        dns_backend: SAMBA_INTERNAL
+        state: present
+      register: _again
+
+    - name: Verify | The repeat run changed nothing and reports the joined domain
+      ansible.builtin.assert:
+        that:
+          - _again is not changed
+          - _again.joined is true
+          - _again.domain.domaindn | length > 0
+
+    - name: Verify | samba_join_dc in check mode on a joined host is a no-op
+      # No bind_password is needed for an already-joined host: the state is read
+      # from the local sam.ldb before any password is required.
+      jomrr.samba.samba_join_dc:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        state: present
+      check_mode: true
+      register: _check
+
+    - name: Verify | Check mode reports no change on the joined host
+      ansible.builtin.assert:
+        that:
+          - _check is not changed
+          - _check.joined is true
+
+    - name: Verify | Joining a FOREIGN realm on an existing DC must fail (no overwrite)
+      # This host is already a DC of its own realm; a join request for a different
+      # realm must be refused before any network contact (the discriminator reads
+      # the local sam.ldb first), so the bogus server is never reached.
+      jomrr.samba.samba_join_dc:
+        realm: "{{ _foreign_realm }}"
+        server: "{{ _foreign_server }}"
+        bind_username: Administrator
+        bind_password: "{{ _test_password }}"
+        state: present
+      register: _foreign
+      ignore_errors: true
+
+    - name: Verify | The foreign-realm join was refused, not performed
+      ansible.builtin.assert:
+        that:
+          - _foreign is failed
+          - "'refusing to overwrite' in _foreign.msg"
+
+    # --- Level 2: live interop against the joined DC ---
+    - name: Verify | Look for a join-generated krb5.conf
+      ansible.builtin.stat:
+        path: /var/lib/samba/private/krb5.conf
+      register: _join_krb5
+
+    - name: Verify | Install the join-generated krb5.conf before starting the daemon
+      # If the join wrote this DC's own krb5.conf under the private dir, install it
+      # (the KDC child needs a krb5.conf at startup, the same prerequisite the
+      # other scenarios install before `samba --daemon`). Otherwise the realm-pinned
+      # krb5.conf written in prepare stays in place - same realm, a reachable KDC.
+      ansible.builtin.copy:
+        src: /var/lib/samba/private/krb5.conf
+        dest: /etc/krb5.conf
+        remote_src: true
+        mode: "0644"
+      when: _join_krb5.stat.exists
+
+    - name: Verify | Start the Samba AD DC daemon on the joined DC
+      ansible.builtin.command:
+        cmd: samba --daemon
+      changed_when: true
+
+    - name: Verify | Wait until the joined DC answers a functional query
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - user
+          - list
+      register: _ready
+      until: _ready.rc == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: Verify | The replicated user is visible through the running DC
+      ansible.builtin.assert:
+        that:
+          - "'repltest' in _ready.stdout"
+
+    - name: Verify | Create a user through the joined DC (write path)
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - user
+          - create
+          - "{{ _join_user }}"
+          - "{{ _test_password }}"
+      changed_when: true
+      no_log: true
+
+    - name: Verify | List users and read the created user back
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - user
+          - list
+      register: _users
+      changed_when: false
+
+    - name: Verify | The created user appears in the listing
+      ansible.builtin.assert:
+        that:
+          - _join_user in _users.stdout

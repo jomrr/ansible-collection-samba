@@ -1,0 +1,127 @@
+---
+# Multi-host integration scenario for samba_join_dc, ISOLATED from the default
+# and provision scenarios (separate container names, separate run, separate
+# realms) so a bug here cannot take the other suites down.
+#
+# Topology: isolated DC+joiner PAIRS, one distinct realm per pair, the DC always
+# Debian. Four pairs = eight containers (4 DCs + 4 joiners):
+#
+#   dc-deb  (debian, realm DEB.EXAMPLE.COM)  <- jn-deb  (debian)
+#   dc-fed  (debian, realm FED.EXAMPLE.COM)  <- jn-fed  (fedora)
+#   dc-suse (debian, realm SUSE.EXAMPLE.COM) <- jn-suse (opensuse)
+#   dc-ubu  (debian, realm UBU.EXAMPLE.COM)  <- jn-ubu  (ubuntu)
+#
+# Why pairs and not one DC with four concurrent joiners (see decisions.md, the
+# join_dc topology note): molecule converges hosts in parallel, and four DCs
+# joining ONE domain at once races on the RID pool, DNS registration and NetBIOS
+# names; even serialized it leaves a five-DC domain whose replication state is
+# fragile to assert. One distinct realm per pair makes each pair fully isolated
+# even on the shared podman network (distinct Kerberos realm + DNS zone, no
+# cross-talk), and isolates a per-distro failure to its own pair. The variation
+# under test is the JOINING distro; the DC side stays Debian on purpose.
+#
+# All eight containers share one podman network so each joiner can reach its DC
+# (the driver auto-creates the network; aardvark-dns resolves the container
+# names). Names are short and collision-free vs default (samba-*) and provision
+# (prov-*) so the derived NetBIOS names stay within the 15-character limit.
+
+driver:
+  name: podman
+
+platforms:
+  # --- pair: debian ---
+  - name: dc-deb
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-dc
+    groups: [dc]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: jn-deb
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-dc
+    groups: [joiner]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  # --- pair: fedora ---
+  - name: dc-fed
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-dc
+    groups: [dc]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: jn-fed
+    image: docker.io/fedora:latest
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-dc
+    groups: [joiner]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  # --- pair: opensuse ---
+  - name: dc-suse
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-dc
+    groups: [dc]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: jn-suse
+    image: docker.io/opensuse/tumbleweed:latest
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-dc
+    groups: [joiner]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  # --- pair: ubuntu ---
+  - name: dc-ubu
+    image: docker.io/debian:stable
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-dc
+    groups: [dc]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+  - name: jn-ubu
+    image: docker.io/ubuntu:latest
+    pre_build_image: true
+    privileged: true
+    network: jomrr-join-dc
+    groups: [joiner]
+    tmpfs:
+      /var/lib/samba: "rw,size=1g,mode=0755"
+
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        # The DC admin password each DC is provisioned with and each joiner binds
+        # with; meets the AD complexity policy.
+        samba_admin_password: "P@ssw0rd-Int3gration"
+        # Each host's own fully-qualified name in its pair's realm.
+        samba_fqdn: "{{ inventory_hostname }}.{{ samba_realm | lower }}"
+    host_vars:
+      # Each pair shares a realm; the joiner additionally points at its DC.
+      dc-deb: {samba_realm: DEB.EXAMPLE.COM, samba_domain: DEB}
+      jn-deb: {samba_realm: DEB.EXAMPLE.COM, samba_domain: DEB, target_dc: dc-deb}
+      dc-fed: {samba_realm: FED.EXAMPLE.COM, samba_domain: FED}
+      jn-fed: {samba_realm: FED.EXAMPLE.COM, samba_domain: FED, target_dc: dc-fed}
+      dc-suse: {samba_realm: SUSE.EXAMPLE.COM, samba_domain: SUSE}
+      jn-suse: {samba_realm: SUSE.EXAMPLE.COM, samba_domain: SUSE, target_dc: dc-suse}
+      dc-ubu: {samba_realm: UBU.EXAMPLE.COM, samba_domain: UBU}
+      jn-ubu: {samba_realm: UBU.EXAMPLE.COM, samba_domain: UBU, target_dc: dc-ubu}
+  playbooks:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+
+verifier:
+  name: ansible

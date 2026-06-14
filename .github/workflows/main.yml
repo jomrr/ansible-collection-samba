@@ -31,11 +31,17 @@ jobs:
     strategy:
       fail-fast: false
       # default = the object-module suite; provision = the samba_provision
-      # scenario. Separate matrix jobs so a failure is unambiguously attributable.
+      # scenario; join_dc = the multi-host samba_join_dc scenario (DC+joiner
+      # pairs, eight containers). Separate matrix jobs so a failure is
+      # unambiguously attributable. The join_dc job needs no extra setup: the
+      # podman driver auto-creates the shared network the pairs use, and the
+      # inotify limits raised below already give the larger container count
+      # headroom.
       matrix:
         scenario:
           - default
           - provision
+          - join_dc
     env:
       # Resolve both the collection under test (checked out below) and the
       # containers.podman collection the Molecule podman driver needs, from one

@@ -202,6 +202,13 @@ class SambaJoinDcIO:
         load_parm = param.LoadParm()
         load_parm.load_default()
 
+        # join_DC() requires a netbios_name: the whole SPN/DN setup in
+        # DCJoinContext is guarded by `if netbios_name:`, so passing None makes
+        # the join fail internally. When the caller omits it, derive the same
+        # default samba-tool uses - the host's NetBIOS name from loadparm (the
+        # hostname's first label, upper-cased and length-clamped).
+        netbios_name = params["netbios_name"] or load_parm.get("netbios name")
+
         creds = credentials.Credentials()
         creds.guess(load_parm)
         creds.set_username(params["bind_username"])
@@ -219,7 +226,7 @@ class SambaJoinDcIO:
                 creds=creds,
                 lp=load_parm,
                 site=params["site"],
-                netbios_name=params["netbios_name"],
+                netbios_name=netbios_name,
                 domain=params["domain"],
                 dns_backend=params["dns_backend"],
             )
