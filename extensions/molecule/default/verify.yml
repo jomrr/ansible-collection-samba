@@ -264,3 +264,27 @@
       ansible.builtin.assert:
         that:
           - _dns_removed.records | length == 0
+
+    # Zones are verified via samba-tool dns zonelist (the RPC path; the admin
+    # password is passed through the PASSWD environment variable, never on the
+    # command line). The DC's RPC readiness is gated in prepare.yml.
+    - name: Verify | List the DNS zones
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - dns
+          - zonelist
+          - "{{ samba_fqdn }}"
+          - "--username=Administrator"
+      environment:
+        PASSWD: "{{ samba_admin_password }}"
+      register: _zonelist
+      changed_when: false
+
+    - name: Verify | The created zones exist and the deleted one is gone
+      ansible.builtin.assert:
+        that:
+          - "'ztest.example.com' in _zonelist.stdout"
+          - "'2.0.192.in-addr.arpa' in _zonelist.stdout"
+          - "'zforest.example.com' in _zonelist.stdout"
+          - "'zdelete.example.com' not in _zonelist.stdout"

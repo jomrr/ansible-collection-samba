@@ -284,3 +284,8 @@
             type: A
             value: 192.0.2.99
             state: present
+
+        - name: Prepare | seed | DNS zone converge will remove
+          jomrr.samba.samba_dns_zone:
+            name: zdelete.example.com
+            state: present

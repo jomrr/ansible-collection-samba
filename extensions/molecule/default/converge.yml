@@ -270,3 +270,29 @@
         type: A
         value: 192.0.2.200
         state: absent
+
+    - name: Converge | Create a forward DNS zone
+      jomrr.samba.samba_dns_zone:
+        name: ztest.example.com
+        state: present
+
+    - name: Converge | Create a reverse DNS zone
+      jomrr.samba.samba_dns_zone:
+        name: 2.0.192.in-addr.arpa
+        state: present
+
+    - name: Converge | Create a forest-replicated DNS zone
+      jomrr.samba.samba_dns_zone:
+        name: zforest.example.com
+        replication: forest
+        state: present
+
+    - name: Converge | Remove a seeded DNS zone (and its records)
+      jomrr.samba.samba_dns_zone:
+        name: zdelete.example.com
+        state: absent
+
+    - name: Converge | Absent on a non-existent DNS zone is a no-op
+      jomrr.samba.samba_dns_zone:
+        name: zghost.example.com
+        state: absent
