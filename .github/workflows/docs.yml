@@ -1,0 +1,81 @@
+---
+# Build the antsibull-docs Sphinx docsite and deploy it to GitHub Pages.
+#
+# NOTE for the maintainer: this deploy only takes effect once GitHub Pages is
+# enabled for the repository with Settings -> Pages -> "Build and deployment" ->
+# Source = "GitHub Actions". Until then the build runs but the deploy step has
+# nowhere to publish.
+#
+# Uses the modern Pages-via-Actions flow (upload-pages-artifact + deploy-pages),
+# not a gh-pages branch push. The generated RST and HTML are produced fresh in
+# CI (docs/build.sh) and are never committed.
+name: docs
+
+"on":
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Least privilege plus the two tokens the Pages deployment needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent Pages deployment; do not cancel an in-progress one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  COLLECTION_PATH: ansible_collections/jomrr/samba
+
+jobs:
+  build:
+    name: Build the docsite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the collection
+        # antsibull-docs needs the collection at ansible_collections/<ns>/<name>
+        # so `--use-current` can find it.
+        uses: actions/checkout@v5
+        with:
+          path: ansible_collections/jomrr/samba
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Install the docsite build requirements
+        run: python -m pip install --disable-pip-version-check -r docs/requirements.txt
+        working-directory: ${{ env.COLLECTION_PATH }}
+
+      - name: Build the docsite (antsibull-docs + Sphinx)
+        # ANSIBLE_COLLECTIONS_PATH points at the checkout root so `--use-current`
+        # resolves jomrr.samba; build.sh regenerates rst/ and builds build/html.
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ github.workspace }}
+        run: ./build.sh
+        working-directory: ${{ env.COLLECTION_PATH }}/docs
+
+      - name: Upload the HTML as a Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ env.COLLECTION_PATH }}/docs/build/html
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

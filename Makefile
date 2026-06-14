@@ -8,10 +8,13 @@
 
 PYTHON_VERSION := 3.12
 AT := ANSIBLE_TEST_PREFER_PODMAN=1 ansible-test
+# The directory that contains ansible_collections/ (three levels up from this
+# collection dir), so antsibull-docs' `--use-current` can resolve jomrr.samba.
+COLLECTIONS_ROOT := $(CURDIR)/../../..
 
 .DEFAULT_GOAL := help
 
-.PHONY: help lint sanity units test molecule build changelog promote release release-dry clean
+.PHONY: help lint sanity units test molecule build changelog promote release release-dry docs docs-clean clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -36,6 +39,12 @@ build: ## Build the collection tarball into dist/ (overwrites existing)
 
 changelog: ## Generate the Galaxy changelog from fragments (antsibull-changelog)
 	antsibull-changelog release
+
+docs: ## Build the Sphinx HTML docsite into docs/build/html (antsibull-docs)
+	ANSIBLE_COLLECTIONS_PATH=$(COLLECTIONS_ROOT) bash docs/build.sh
+
+docs-clean: ## Remove the generated docsite output (docs/rst, docs/build)
+	rm -rf docs/rst docs/build
 
 # Linear dev -> main promote. --ff-only fails (instead of making a merge commit)
 # if dev and main have diverged, so a divergence is surfaced, not hidden. Merges

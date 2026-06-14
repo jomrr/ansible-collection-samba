@@ -24,6 +24,7 @@ build_ignore:
   # development-only directories and files, not shipped in the release artifact
   - extensions/molecule
   - architecture
+  - docs
   - .ansible-lint
   - .github
   - .ansible
