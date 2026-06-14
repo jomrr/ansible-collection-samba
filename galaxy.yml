@@ -32,6 +32,8 @@ build_ignore:
   - CLAUDE.md
   - dist
   - "*.tar.gz"
+  - pyproject.toml
+  - Makefile
   - .mypy_cache
   - "*/.mypy_cache"
   - .pytest_cache

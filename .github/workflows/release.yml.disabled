@@ -1,0 +1,87 @@
+---
+# ============================================================================
+# DISABLED — kept as a template, not executed by GitHub.
+#
+# GitHub Actions only runs workflow files ending in .yml/.yaml, so this
+# ".yml.disabled" file never triggers. Releases currently run LOCALLY via
+# `make release` (python-semantic-release with the maintainer's GH_TOKEN).
+#
+# To reactivate as CI later:
+#   1. Rename this file back to `release.yml`.
+#   2. Set the repository Actions workflow permissions to read/write
+#      (Settings -> Actions -> General -> Workflow permissions).
+#   3. Allow the release push to main: either exempt github-actions[bot] from
+#      the main branch protection, or use a PAT with bypass (PSR pushes the
+#      version-bump commit + tag directly to main).
+# ============================================================================
+#
+# Release workflow: MANUAL only (workflow_dispatch). python-semantic-release
+# derives the next version from the Conventional Commits since the last tag,
+# bumps galaxy.yml, builds the collection tarball, commits + tags (vX.Y.Z) on
+# main and creates the GitHub release with commit-derived notes and the tarball
+# attached. It does NOT publish to Galaxy/PyPI, and it does NOT touch
+# CHANGELOG.rst (that stays antsibull-changelog's; run with --no-changelog).
+#
+# Releases are only cut from main/master (the PSR branch release group). Dispatch
+# this workflow on the main branch. The fast gates run first via test.yml; the
+# release job runs only if they pass.
+name: release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: compute the next version without committing, tagging or releasing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    # Same sanity/units/lint as dev/main, run before cutting a release.
+    uses: ./.github/workflows/test.yml
+
+  release:
+    name: Release (python-semantic-release)
+    needs: gates
+    runs-on: ubuntu-latest
+    permissions:
+      # Push the version-bump commit + tag and create the GitHub release.
+      contents: write
+    steps:
+      - name: Check out full history and tags
+        # semantic-release needs the complete history and all tags to parse the
+        # commits since the last release (unlike the depth:1 fast gates).
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install python-semantic-release and ansible-core
+        # ansible-core is needed for the build_command (ansible-galaxy collection
+        # build) that semantic-release runs to produce the release tarball.
+        run: >-
+          python -m pip install --disable-pip-version-check
+          python-semantic-release "ansible-core>=2.19"
+
+      - name: Run python-semantic-release
+        env:
+          # PSR resolves the GitHub token from GH_TOKEN for the push and release.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          noop=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            noop="--noop"
+          fi
+          # version: bump galaxy.yml, build the tarball, commit, tag, push,
+          # create the GitHub release (no changelog file written).
+          semantic-release $noop version --no-changelog
+          # publish: attach dist/*.tar.gz to the GitHub release as an asset.
+          semantic-release $noop publish
