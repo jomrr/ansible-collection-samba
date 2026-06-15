@@ -1,0 +1,16 @@
+---
+# Collection dependencies for the integration (Molecule) tests ONLY - these are
+# not runtime dependencies of jomrr.samba (the modules talk to Samba through the
+# Python bindings, not through these collections), so they live here and not in
+# galaxy.yml, where they would be forced on every consumer of the collection.
+#
+#   - community.general: provides the zypper module, used by the Molecule
+#     prepare.yml to install packages on the openSUSE hosts (apt and dnf are in
+#     ansible.builtin, zypper is not).
+#   - containers.podman: provides the podman_* modules that Molecule's
+#     create.yml/destroy.yml call to manage the test containers. (The podman
+#     *driver* itself comes from the molecule-plugins[podman] pip package - a
+#     separate thing from this collection.)
+collections:
+  - name: community.general
+  - name: containers.podman

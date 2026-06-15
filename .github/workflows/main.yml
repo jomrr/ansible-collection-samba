@@ -78,11 +78,14 @@ jobs:
           python -m pip install --disable-pip-version-check
           "ansible-core>=2.19" molecule "molecule-plugins[podman]"
 
-      - name: Install the Podman driver's collection dependency
-        # The Molecule podman driver's playbooks use containers.podman.
-        # Install it beside the collection for ANSIBLE_COLLECTIONS_PATH.
+      - name: Install the integration-test collection dependencies
+        # community.general (the zypper module for the openSUSE hosts) and
+        # containers.podman (the podman_* modules Molecule's create/destroy use).
+        # Test-only collection deps, kept out of galaxy.yml; installed beside the
+        # collection for ANSIBLE_COLLECTIONS_PATH.
         run: >-
-          ansible-galaxy collection install containers.podman
+          ansible-galaxy collection install
+          -r "${{ env.COLLECTION_PATH }}/tests/integration/requirements.yml"
           -p "${{ github.workspace }}"
 
       - name: Run Molecule (${{ matrix.scenario }}, all four distros)
