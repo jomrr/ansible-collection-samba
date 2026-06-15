@@ -19,7 +19,7 @@ description:
     C(samba.samdb.SamDB)), not through C(samba-tool) subprocesses.
   - This module is read-only; it never changes the directory and always reports
     C(changed=false).
-  - The returned record fields mirror the parameters of M(jomrr.samba.samba_dns_record),
+  - The returned record fields mirror the parameters of C(jomrr.samba.samba_dns_record),
     so a returned entry can be fed back as that module's input.
 author:
   - Jonas Mauer (@jomrr)
@@ -152,8 +152,8 @@ _EXTRA_FIELDS = ("preference", "priority", "weight", "port")
 def public_record(zone, name, spec):
     """Build the externally reported record from a decoded spec.
 
-    Field names match M(jomrr.samba.samba_dns_record)'s parameters, so the result
-    is the read mirror of that module's write input.
+    Field names match the parameters of jomrr.samba.samba_dns_record, so the
+    result is the read mirror of that module's write input.
     """
     record = {
         "zone": zone,
