@@ -233,6 +233,85 @@ task (the lifecycle modules are not in the group):
         state: present
 ```
 
+## Security
+
+This section describes the security mechanisms the collection actually
+implements. It documents properties that are verifiable in the code; it makes no
+guarantee of security against all attacks, and the honest limits are stated
+alongside.
+
+### Credentials and the connection
+
+The object and info modules connect over LDAP with SASL/GSSAPI, configured in
+`plugins/module_utils/samba_conn.py`:
+
+- **Kerberos is required.** The credentials are set to `MUST_USE_KERBEROS`, so an
+  authentication attempt fails rather than silently falling back to NTLM.
+- **The connection is sealed.** `client ldap sasl wrapping` is forced to `seal`,
+  so the bind requires the GSSAPI confidentiality layer (encryption) and fails
+  rather than downgrading to a signed-only or plain bind. There is no LDAPS or
+  StartTLS — the GSSAPI layer encrypts the traffic on port 389.
+- **The Kerberos ticket stays in memory.** The ticket obtained from the bind
+  credentials is held in a process-private in-memory credential cache
+  (`KRB5CCNAME=MEMORY:…`); it never lands on disk and dies with the module
+  process.
+- **Explicit caller credentials, not implicit rights.** Every operation uses the
+  `bind_username`/`bind_password`/`realm` you pass (the directory authorizes each
+  change against that principal), rather than an implicit machine-account or
+  local-root path. Bind with an account that has only the privileges it needs.
+
+### Secret handling
+
+`bind_password`, user `password`, and the join `machinepass` are marked `no_log`.
+No password value is interpolated into any return value, diff, error message or
+log: error paths reference the object name, DN or realm — never the password —
+and the connection-failure path deliberately does not echo the underlying
+exception (which can carry the principal). Keep `bind_password` and user
+passwords in **Ansible Vault** or an external secret store; `no_log` scrubs
+module output but does not protect a plain-text value at rest.
+
+### Injection resistance
+
+User input that flows into a directory query or a distinguished name is escaped
+through the `ldb` bindings, never built by string concatenation:
+
+- **LDAP/LDB filters** escape every value with `ldb.binary_encode` (for example
+  the `sAMAccountName`, zone and member lookups). It hex-encodes the value's
+  bytes, including the filter metacharacters `( ) * \` and NUL, and does not
+  normalize — so a Unicode look-alike of a metacharacter (a full-width comma, a
+  zero-width or right-to-left character) is encoded as its own bytes and can
+  never become filter syntax.
+- **Distinguished names** are built with `ldb.Dn.set_component` (the RDN value is
+  escaped) and parsed with `ldb.Dn` (a malformed `path` is rejected with a clear
+  error). An embedded `,OU=…` in a name therefore stays a single, escaped RDN
+  value — it cannot re-parent the object into another container.
+
+**Honest limit:** idempotency compares names by exact code points; the modules do
+not Unicode-normalize input. With non-ASCII names, provide a consistent
+normalization across runs. Inconsistent normalization (e.g. NFC in one run, NFD
+in another) can at worst mismatch an existing object and create a duplicate — it
+is a data-consistency edge, not a security issue.
+
+### The CLI exception
+
+Almost every module uses the native `samba` Python bindings and passes the join
+password through `samba.credentials` (`set_password`), never on a command line.
+The one exception is `samba_join_sssd`, which drives the `adcli` command line
+tool (there is no Python binding for it): the join password is fed to `adcli` on
+**stdin** (`--stdin-password`), so it never appears as a command-line argument
+(and thus never in the process list).
+
+### Execution model
+
+- The **object and info modules** are remote-capable over the sealed GSSAPI LDAP
+  connection and are preferably run on the DC itself (loopback).
+- The **lifecycle modules** (`samba_provision`, the join modules) run locally on
+  the target machine and write local secret stores — the directory database
+  (`sam.ldb`), the machine secret (`secrets.tdb`) or a Kerberos keytab
+  (`/etc/krb5.keytab`). Protecting those files with the host's normal filesystem
+  permissions is the host's responsibility, outside the module's scope (the
+  modules perform only the provision/join act).
+
 ## Usage examples
 
 Create a forward DNS zone and a record in it:
