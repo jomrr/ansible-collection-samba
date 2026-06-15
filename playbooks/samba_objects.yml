@@ -1,0 +1,152 @@
+---
+# Manage Samba AD objects (OUs, groups, users) idempotently from a data
+# structure, in the only order that works.
+#
+# Call it as a collection playbook:
+#     ansible-playbook jomrr.samba.samba_objects \
+#         -e samba_target=dc1.example.com -e @secrets.yml
+#
+# The value of this playbook over a naive loop is the ENFORCED ORDER. Objects
+# depend on each other, so the four blocks must run in sequence:
+#
+#   1. OUs            - users and groups are placed into OUs (their `path` is an
+#                       OU DN), so the OU must exist first. Nested OUs: a parent
+#                       OU must exist before its child, so list parent OUs before
+#                       child OUs (samba_ou builds OU=<name>,<path> and fails
+#                       clearly if <path> does not exist - mis-ordering is loud,
+#                       never silently wrong).
+#   2. Groups (shells) - created WITHOUT members. The users do not exist yet, so
+#                       a membership here would reference a missing user. Omitting
+#                       `members` means samba_group does not touch membership.
+#   3. Users          - created into the now-existing OUs.
+#   4. Memberships    - only now, with both groups AND users present, the groups
+#                       are re-asserted WITH their members. samba_group is
+#                       idempotent, so re-running it on an existing group (this
+#                       time adding members) is a clean second pass.
+#
+# Idempotency and check mode are inherited from the modules: a second run with
+# the same data reports changed: false.
+#
+# ---------------------------------------------------------------------------
+# Input variables (all default to empty -> running with no data is a no-op).
+# Fill them via -e, group_vars or Vault. Each field maps 1:1 to the module
+# option of the same name (see the module docs). Example data:
+#
+#   samba_target: dc1.example.com        # where to run (the DC; loopback)
+#   samba_server: dc1.example.com        # the DC to bind to
+#   samba_realm: EXAMPLE.COM
+#   samba_bind_username: Administrator
+#   samba_bind_password: "{{ vault_dc_admin_password }}"   # from Ansible Vault
+#
+#   samba_ous:                           # PARENT OUs BEFORE CHILD OUs
+#     - {name: Staff,  path: "DC=example,DC=com", description: People}
+#     - {name: Eng,    path: "OU=Staff,DC=example,DC=com", description: Engineering}
+#
+#   samba_groups:                        # `members` is optional; block 2 ignores
+#     - name: engineers                  # it, block 4 applies it
+#       scope: global
+#       category: security
+#       path: "OU=Eng,DC=example,DC=com"
+#       description: Engineering team
+#       gid_number: 10010
+#       members: [jdoe]                  # only names of users created below
+#       members_purge: false             # additive (default); true = authoritative
+#
+#   samba_users:                         # passwords ALWAYS from Vault
+#     - username: jdoe
+#       given_name: Jane
+#       surname: Doe
+#       display_name: Jane Doe
+#       email: jane.doe@example.com
+#       path: "OU=Eng,DC=example,DC=com"
+#       uid_number: 10001
+#       gid_number: 10000
+#       unix_home_directory: /home/jdoe
+#       login_shell: /bin/bash
+#       enabled: true
+#       password: "{{ vault_jdoe_password }}"
+# ---------------------------------------------------------------------------
+- name: Manage Samba AD objects from a data structure
+  hosts: "{{ samba_target | default('samba_dc') }}"
+  gather_facts: false
+  # The connection parameters are set once here for every jomrr.samba object
+  # module via the action group, instead of being repeated on every task.
+  module_defaults:
+    group/jomrr.samba.all:
+      server: "{{ samba_server }}"
+      bind_username: "{{ samba_bind_username | default('Administrator') }}"
+      bind_password: "{{ samba_bind_password }}"
+      realm: "{{ samba_realm | default(omit) }}"
+  tasks:
+    # --- Block 1: OUs first (parents before children) ---
+    - name: Ensure organizational units exist
+      jomrr.samba.samba_ou:
+        name: "{{ ou.name }}"
+        path: "{{ ou.path }}"
+        description: "{{ ou.description | default(omit) }}"
+        state: present
+      loop: "{{ samba_ous | default([]) }}"
+      loop_control:
+        loop_var: ou
+        label: "{{ ou.name }} ({{ ou.path }})"
+
+    # --- Block 2: groups as empty shells (NO members yet) ---
+    - name: Ensure groups exist (without members)
+      jomrr.samba.samba_group:
+        name: "{{ group.name }}"
+        scope: "{{ group.scope | default('global') }}"
+        category: "{{ group.category | default('security') }}"
+        path: "{{ group.path | default(omit) }}"
+        description: "{{ group.description | default(omit) }}"
+        gid_number: "{{ group.gid_number | default(omit) }}"
+        state: present
+      loop: "{{ samba_groups | default([]) }}"
+      loop_control:
+        loop_var: group
+        label: "{{ group.name }}"
+
+    # --- Block 3: users (into the now-existing OUs) ---
+    - name: Ensure users exist
+      jomrr.samba.samba_user:
+        username: "{{ user.username }}"
+        given_name: "{{ user.given_name | default(omit) }}"
+        surname: "{{ user.surname | default(omit) }}"
+        display_name: "{{ user.display_name | default(omit) }}"
+        email: "{{ user.email | default(omit) }}"
+        description: "{{ user.description | default(omit) }}"
+        uid_number: "{{ user.uid_number | default(omit) }}"
+        gid_number: "{{ user.gid_number | default(omit) }}"
+        unix_home_directory: "{{ user.unix_home_directory | default(omit) }}"
+        login_shell: "{{ user.login_shell | default(omit) }}"
+        gecos: "{{ user.gecos | default(omit) }}"
+        path: "{{ user.path | default(omit) }}"
+        enabled: "{{ user.enabled | default(true) }}"
+        password: "{{ user.password | default(omit) }}"
+        state: present
+      loop: "{{ samba_users | default([]) }}"
+      # label is the username only, so the vaulted password (no_log on the
+      # module) never appears in the loop's task output.
+      loop_control:
+        loop_var: user
+        label: "{{ user.username }}"
+
+    # --- Block 4: group memberships last (groups AND users now exist) ---
+    # Re-assert each group that declares members. The group definition is
+    # repeated (so scope/category/path are not reset to defaults) and `members`
+    # is now applied; the module is idempotent, so this is a clean second pass.
+    - name: Ensure group memberships
+      jomrr.samba.samba_group:
+        name: "{{ group.name }}"
+        scope: "{{ group.scope | default('global') }}"
+        category: "{{ group.category | default('security') }}"
+        path: "{{ group.path | default(omit) }}"
+        description: "{{ group.description | default(omit) }}"
+        gid_number: "{{ group.gid_number | default(omit) }}"
+        members: "{{ group.members }}"
+        members_purge: "{{ group.members_purge | default(false) }}"
+        state: present
+      loop: "{{ samba_groups | default([]) }}"
+      when: group.members | default([]) | length > 0
+      loop_control:
+        loop_var: group
+        label: "{{ group.name }}"

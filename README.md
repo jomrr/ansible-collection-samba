@@ -316,6 +316,23 @@ the join):
 `samba_join_dc` and `samba_join_sssd` follow the same shape (run on the joining
 host; `server`/`bind_*` identify the DC and the join credentials).
 
+### Bundled playbook
+
+The collection ships a runnable example playbook,
+[`playbooks/samba_objects.yml`](playbooks/samba_objects.yml), that manages OUs,
+groups and users idempotently from a data structure in the **correct dependency
+order** (OUs → empty groups → users → group memberships), using the action group
+for the connection options. Call it directly:
+
+```bash
+ansible-playbook jomrr.samba.samba_objects \
+  -e samba_target=dc1.example.com -e @secrets.yml
+```
+
+The input lists (`samba_ous`, `samba_groups`, `samba_users`) default to empty, so
+running it without data is a no-op; the playbook header documents the data
+structure. Keep user passwords in Ansible Vault.
+
 ## Architecture
 
 See `architecture/decisions.md` in the source repository for the design
