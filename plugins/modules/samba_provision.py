@@ -93,8 +93,8 @@ options:
   use_rfc2307:
     description:
       - Whether to provision the domain with RFC2307 (NIS) support, enabling the
-        POSIX attributes managed by M(jomrr.samba.samba_user) and
-        M(jomrr.samba.samba_group).
+        POSIX attributes managed by C(jomrr.samba.samba_user) and
+        C(jomrr.samba.samba_group).
     type: bool
     default: false
   state:
@@ -113,6 +113,8 @@ notes:
 seealso:
   - module: jomrr.samba.samba_user
     description: Manage users once the domain controller is provisioned.
+  - module: jomrr.samba.samba_group
+    description: Manage groups once the domain controller is provisioned.
 """
 
 EXAMPLES = r"""

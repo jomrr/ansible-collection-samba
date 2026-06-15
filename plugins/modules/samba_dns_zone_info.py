@@ -18,11 +18,11 @@ description:
   - Talks to the directory through the native C(samba) Python bindings
     (C(samba.samdb.SamDB)) over LDAP, not through C(samba-tool) subprocesses and
     not through the C(dnsserver) RPC (that is only the write path of
-    M(jomrr.samba.samba_dns_zone)).
+    C(jomrr.samba.samba_dns_zone)).
   - This module is read-only; it never changes the directory and always reports
     C(changed=false).
   - The returned zone fields mirror the parameters of
-    M(jomrr.samba.samba_dns_zone) (C(name), C(replication)), so a returned entry
+    C(jomrr.samba.samba_dns_zone) (C(name), C(replication)), so a returned entry
     can be fed back as that module's input.
 author:
   - Jonas Mauer (@jomrr)

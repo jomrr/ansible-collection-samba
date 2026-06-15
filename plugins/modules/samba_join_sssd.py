@@ -14,8 +14,8 @@ description:
   - Join the local host to an existing Active Directory domain using C(adcli),
     which creates the machine account and writes a Kerberos B(keytab)
     (C(/etc/krb5.keytab)) that SSSD then uses to authenticate to the domain.
-  - This is the SSSD branch of the join family. Unlike M(jomrr.samba.samba_join_dc)
-    and M(jomrr.samba.samba_join_member) (which use the native C(samba) bindings),
+  - This is the SSSD branch of the join family. Unlike C(jomrr.samba.samba_join_dc)
+    and C(jomrr.samba.samba_join_member) (which use the native C(samba) bindings),
     this module runs the C(adcli) command line tool - there is no Python binding
     for it. It is the one deliberate subprocess in the collection, kept isolated
     to this module.

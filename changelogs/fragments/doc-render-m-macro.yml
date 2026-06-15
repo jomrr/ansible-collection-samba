@@ -1,0 +1,11 @@
+---
+bugfixes:
+  - >-
+    Documentation rendering - replace the C(M()) module-reference markup macro
+    with C(C()) (and structured C(seealso) entries) in samba_provision,
+    samba_dns_record_info, samba_dns_zone_info and samba_join_sssd. The macro is
+    valid markup and renders locally, but the Galaxy/Automation Hub
+    documentation renderer could not parse it and fell back to the raw JSON dump
+    for those four modules. The collection itself was unaffected (import,
+    install and functionality were always fine); only the rendered doc pages
+    were.
