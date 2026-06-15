@@ -1,0 +1,112 @@
+---
+# Manage Samba AD DNS (zones, records) idempotently from a data structure, in the
+# only order that works.
+#
+# Call it as a collection playbook:
+#     ansible-playbook jomrr.samba.samba_dns \
+#         -e samba_target=dc1.example.com -e @secrets.yml
+#
+# Like jomrr.samba.samba_objects, the value over a naive loop is the ENFORCED
+# ORDER. A record lives inside a zone, so the two blocks must run in sequence:
+#
+#   1. Zones    - a zone is the container; it must exist before any record is
+#                 created in it (container before content, the DNS analogue of
+#                 OU-before-user).
+#   2. Records  - created into the now-existing zones. Each record names its zone
+#                 (block 1 created it), so no record ever points at a missing
+#                 zone.
+#
+# Idempotency and check mode are inherited from the modules: a second run with
+# the same data reports changed: false. Note that the zone's `replication` scope
+# is fixed at creation - the module ensures an existing zone exists but does not
+# move it between partitions.
+#
+# Connection: both DNS modules are in the jomrr.samba.all action group and take
+# the same connection options as the directory modules, set once below. (Under
+# the hood samba_dns_zone additionally uses the dnsserver RPC and samba_dns_record
+# uses the local directory; running on the DC, as here, both paths are local. See
+# the README "Execution topology" for the remote/firewall case.)
+#
+# DNS backend: this manages DNS at the directory level - zones and records live in
+# the AD partitions (CN=MicrosoftDNS), which is where BOTH AD-integrated backends
+# store them. So it works the same under SAMBA_INTERNAL and BIND9_DLZ; only how
+# queries are answered differs (Samba's own server vs BIND through the DLZ module,
+# which reads the same directory). The zone create/delete go through the dnsserver
+# RPC as a directory-integrated zone (fDsIntegrated, exactly like
+# `samba-tool dns zonecreate`); records are written into the directory directly.
+# Neither assumes a backend, and no zone files are edited. (The legacy
+# BIND9_FLATFILE backend keeps zones in flat files, not the directory, so it is
+# the exception - these modules manage directory-integrated DNS.)
+#
+# ---------------------------------------------------------------------------
+# Input variables (all default to empty -> running with no data is a no-op).
+# Fill them via -e, group_vars or Vault. Each field maps 1:1 to the module
+# option of the same name (see the module docs). Example data:
+#
+#   samba_target: dc1.example.com        # where to run (the DC; loopback)
+#   samba_server: dc1.example.com        # the DC to bind to
+#   samba_realm: EXAMPLE.COM
+#   samba_bind_username: Administrator
+#   samba_bind_password: "{{ vault_dc_admin_password }}"   # from Ansible Vault
+#
+#   samba_dns_zones:
+#     - {name: example.com, replication: domain}    # domain | forest
+#     - {name: 2.0.192.in-addr.arpa}                # a reverse zone
+#
+#   samba_dns_records:                   # each record names a zone created above;
+#                                        # `name` is relative to the zone (@ = apex)
+#     - {zone: example.com, name: www,  type: A,     value: 192.0.2.10}
+#     - {zone: example.com, name: www,  type: AAAA,  value: "2001:db8::10"}
+#     - {zone: example.com, name: ftp,  type: CNAME, value: www.example.com}
+#     - {zone: example.com, name: "@",  type: MX,    value: mail.example.com, preference: 10}
+#     - {zone: example.com, name: "@",  type: TXT,   value: "v=spf1 -all"}
+#     - zone: example.com
+#       name: _ldap._tcp
+#       type: SRV
+#       value: dc1.example.com
+#       priority: 0
+#       weight: 100
+#       port: 389
+# ---------------------------------------------------------------------------
+- name: Manage Samba AD DNS from a data structure
+  hosts: "{{ samba_target | default('samba_dc') }}"
+  gather_facts: false
+  # The connection parameters are set once here for every jomrr.samba module via
+  # the action group, instead of being repeated on every task.
+  module_defaults:
+    group/jomrr.samba.all:
+      server: "{{ samba_server }}"
+      bind_username: "{{ samba_bind_username | default('Administrator') }}"
+      bind_password: "{{ samba_bind_password }}"
+      realm: "{{ samba_realm | default(omit) }}"
+  tasks:
+    # --- Block 1: zones first (the container) ---
+    - name: Ensure DNS zones exist
+      jomrr.samba.samba_dns_zone:
+        name: "{{ zone.name }}"
+        replication: "{{ zone.replication | default('domain') }}"
+        state: present
+      loop: "{{ samba_dns_zones | default([]) }}"
+      loop_control:
+        loop_var: zone
+        label: "{{ zone.name }}"
+
+    # --- Block 2: records last (into the now-existing zones) ---
+    # Type-specific structure options are passed only when present: preference for
+    # MX; priority/weight/port for SRV.
+    - name: Ensure DNS records exist
+      jomrr.samba.samba_dns_record:
+        zone: "{{ record.zone }}"
+        name: "{{ record.name }}"
+        type: "{{ record.type }}"
+        value: "{{ record.value }}"
+        preference: "{{ record.preference | default(omit) }}"
+        priority: "{{ record.priority | default(omit) }}"
+        weight: "{{ record.weight | default(omit) }}"
+        port: "{{ record.port | default(omit) }}"
+        ttl: "{{ record.ttl | default(omit) }}"
+        state: present
+      loop: "{{ samba_dns_records | default([]) }}"
+      loop_control:
+        loop_var: record
+        label: "{{ record.name }} {{ record.type }} in {{ record.zone }}"

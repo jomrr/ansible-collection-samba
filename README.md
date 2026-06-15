@@ -333,6 +333,18 @@ The input lists (`samba_ous`, `samba_groups`, `samba_users`) default to empty, s
 running it without data is a no-op; the playbook header documents the data
 structure. Keep user passwords in Ansible Vault.
 
+A companion playbook, [`playbooks/samba_dns.yml`](playbooks/samba_dns.yml),
+manages DNS the same way — zones then records, in dependency order:
+
+```bash
+ansible-playbook jomrr.samba.samba_dns \
+  -e samba_target=dc1.example.com -e @secrets.yml
+```
+
+Its input lists (`samba_dns_zones`, `samba_dns_records`) likewise default to
+empty; the header documents the data structure, including the per-type record
+fields (e.g. `preference` for MX, `priority`/`weight`/`port` for SRV).
+
 ## Architecture
 
 See `architecture/decisions.md` in the source repository for the design
