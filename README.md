@@ -1,12 +1,26 @@
 # Ansible Collection: `jomrr.samba`
 
-Modules for managing a Samba Active Directory Domain Controller through the
-native `samba` Python bindings (`samba.samdb.SamDB`, `samba.dcerpc`): users,
-groups, organizational units, and the Samba internal DNS. The modules diff the
-current against the desired state, so they are idempotent and support check
-mode.
+Modules for the full lifecycle of a Samba Active Directory domain, through the
+native `samba` Python bindings (`samba.samdb.SamDB`, `samba.join`,
+`samba.net_s3`, `samba.dcerpc`):
+
+- **Object management** on a running DC — users, groups, organizational units,
+  and the Samba internal DNS.
+- **Domain lifecycle** — provisioning a new domain controller and joining a host
+  to an existing domain (as a DC, a Samba member server, or an SSSD client).
+
+Every module is idempotent and supports check mode: the object modules diff the
+current against the desired state, while the lifecycle modules use a binary
+"is it already provisioned/joined?" check. A second run with the same parameters
+reports `changed: false`.
 
 ## Modules
+
+### Object and info modules
+
+These manage objects on a **running** DC over the network and share the GSSAPI
+connection options through the `jomrr.samba.all` action group (see Connection
+setup).
 
 | Module | Purpose | idempotent | check_mode |
 |--------|---------|------------|------------|
@@ -21,15 +35,53 @@ mode.
 | `samba_dns_zone` | Create and remove AD-integrated DNS zones (forward/reverse) | yes | yes |
 | `samba_dns_zone_info` | Query DNS zones | n/a (read) | n/a |
 
+### Domain lifecycle modules
+
+These run **locally on the target machine** that is becoming/joining a DC, take
+no GSSAPI connection options, and are **not** in the `jomrr.samba.all` action
+group (see Execution topology → Lifecycle modules run locally). Only
+`state: present` is supported — there is no tear-down/leave. Idempotency is
+binary.
+
+| Module | Purpose | idempotent | check_mode |
+|--------|---------|------------|------------|
+| `samba_provision` | Provision a brand-new Samba AD domain controller | yes (binary) | yes |
+| `samba_join_dc` | Join an existing domain as an additional DC | yes (binary) | yes |
+| `samba_join_member` | Join an existing domain as a Samba member server (winbind) | yes (binary) | yes |
+| `samba_join_sssd` | Join an existing domain for SSSD (writes a Kerberos keytab) | yes (binary) | yes |
+
+The three join modules are split **by join mechanism and the artifact each
+writes**, not by the host's intended purpose:
+
+- `samba_join_dc` — `samba.join`, full DC replication.
+- `samba_join_member` — `samba.net_s3`, writes the machine secret to
+  `secrets.tdb` (the winbind path).
+- `samba_join_sssd` — `adcli`, writes a Kerberos keytab (the SSSD path).
+
+Each module performs **only the join act** and its idempotency detection. It
+does not template `smb.conf`/`sssd.conf`, configure idmap/nsswitch/PAM, or
+enable/start the winbind or SSSD daemon — that is the caller's responsibility.
+In particular `samba_join_member` requires a pre-configured `smb.conf`
+(`realm`, `workgroup`, `server role = member server`) to join against.
+
+All modules use the native Python bindings, with **one deliberate exception**:
+`samba_join_sssd` shells out to `adcli` (there is no Python binding for it),
+feeding the join password on stdin, never on the command line.
+
 ## Requirements
 
 - **`python3-samba` on the executing host.** The modules use the native Samba
   Python bindings (`samba.samdb.SamDB` is the bindings class, not a generic LDAP
   client), so the host that *runs* the module must have `python3-samba`
   installed. Which host that is depends on the execution topology (see below):
-  the DC itself in the preferred setup, or the Ansible controller when running
-  against a remote DC. Without the bindings the module fails with
+  for the object/info modules the DC itself (preferred) or the Ansible
+  controller (remote DC); for the lifecycle modules always the target machine
+  being provisioned/joined. Without the bindings the module fails with
   `missing_required_lib`.
+- **`adcli` for `samba_join_sssd` only.** That module drives the `adcli` command
+  line tool (the one module that is not pure bindings), so the target host must
+  have `adcli` installed; it fails cleanly if `adcli` is not on `PATH`. The other
+  lifecycle modules need only `python3-samba`.
 - **Kerberos / GSSAPI:** the executing host must be able to obtain a Kerberos
   ticket for the DC's realm — working DNS/SRV resolution to the DC, a matching
   `krb5.conf`, and synchronised clocks (clock skew breaks Kerberos).
@@ -42,9 +94,11 @@ mode.
 
 ## Execution topology
 
-The modules reach the DC over the network — a GSSAPI sign+seal `ldap://`
-connection, and for `samba_dns_zone` additionally a `dnsserver` RPC — and have
-no DC-local dependency. Two topologies are supported.
+The **object and info modules** reach the DC over the network — a GSSAPI
+sign+seal `ldap://` connection, and for `samba_dns_zone` additionally a
+`dnsserver` RPC — and have no DC-local dependency. Two topologies are supported.
+(The lifecycle modules are different — see *Lifecycle modules run locally* at the
+end of this section.)
 
 ### Preferred — run on the DC (loopback)
 
@@ -104,14 +158,28 @@ fully supports this. It adds requirements on the controller:
 The connection options below are the same in both topologies; only `hosts` and
 the `server` value differ.
 
+### Lifecycle modules run locally
+
+`samba_provision` and the join modules (`samba_join_dc`, `samba_join_member`,
+`samba_join_sssd`) act on the **local machine** that is becoming/joining a DC, so
+they always run *on that host* (`hosts:` the target, or `delegate_to` it). They
+have no GSSAPI sealed-LDAP session and are not in the `jomrr.samba.all` action
+group. The options they share with the object modules by name (`server`,
+`bind_username`, `bind_password`, `realm`) mean something different here: the
+existing DC to join against and the admin credentials to authorize the join —
+not a connection to manage objects on. `samba_provision` takes no `server`/bind
+options at all (there is no DC yet); it provisions the domain locally.
+
 ## Connection setup
 
-Every module connects to the DC with **explicit caller credentials** over LDAP
-using SASL/GSSAPI with signing and sealing on port 389 (the GSSAPI layer
-encrypts the traffic; there is no LDAPS or StartTLS). Kerberos is required and
-the ticket is held in an in-memory credential cache that never touches disk.
+Every **object and info module** connects to the DC with **explicit caller
+credentials** over LDAP using SASL/GSSAPI with signing and sealing on port 389
+(the GSSAPI layer encrypts the traffic; there is no LDAPS or StartTLS). Kerberos
+is required and the ticket is held in an in-memory credential cache that never
+touches disk. (The lifecycle modules do not use this connection layer; see
+Execution topology.)
 
-Each module therefore takes these connection options:
+Each of these modules therefore takes these connection options:
 
 | Option | Required | Description |
 |--------|----------|-------------|
@@ -127,9 +195,9 @@ Each module therefore takes these connection options:
 > the privileges it needs; the DC authorizes every operation against that
 > principal.
 
-All modules share these options through the `jomrr.samba.all` action group, so
+These modules share these options through the `jomrr.samba.all` action group, so
 you can set them once with `module_defaults` instead of repeating them on every
-task:
+task (the lifecycle modules are not in the group):
 
 ```yaml
 - name: Manage the Samba AD DC
@@ -209,6 +277,45 @@ Query state back through an `*_info` module (read-only, `changed: false`):
 The `*_info` modules return the same field names the managing modules accept as
 input, so their output can be fed straight back as write input.
 
+### Domain lifecycle
+
+The lifecycle modules run **on the target host** and do not use the action group.
+Provision a new domain controller:
+
+```yaml
+- name: Provision a new Samba AD domain controller
+  hosts: dc1.example.com           # runs locally on the host becoming the DC
+  tasks:
+    - name: Ensure the domain is provisioned
+      jomrr.samba.samba_provision:
+        realm: EXAMPLE.COM
+        domain: EXAMPLE
+        admin_password: "{{ vault_dc_admin_password }}"   # from Ansible Vault
+        dns_backend: SAMBA_INTERNAL
+        use_rfc2307: true
+        state: present
+```
+
+Join an existing domain as a Samba member server (your playbook configures
+`smb.conf` with `server role = member server` first; the module performs only
+the join):
+
+```yaml
+- name: Join the host as a member server
+  hosts: member1.example.com       # runs locally on the joining host
+  tasks:
+    - name: Ensure the host is a domain member
+      jomrr.samba.samba_join_member:
+        realm: EXAMPLE.COM
+        server: dc1.example.com     # the existing DC to join against
+        bind_username: Administrator
+        bind_password: "{{ vault_dc_admin_password }}"    # from Ansible Vault
+        state: present
+```
+
+`samba_join_dc` and `samba_join_sssd` follow the same shape (run on the joining
+host; `server`/`bind_*` identify the DC and the join credentials).
+
 ## Architecture
 
 See `architecture/decisions.md` in the source repository for the design
@@ -216,6 +323,8 @@ decisions behind the collection:
 
 - Samba backend (native Python bindings) and lazy-import encapsulation
 - Connection model (explicit GSSAPI credentials, sign + seal, in-memory ccache)
+- Domain lifecycle (provision and the join family): split by join mechanism and
+  artifact, bindings everywhere with one deliberate `adcli` CLI exception (sssd)
 - Container runtime (rootless Podman) and DC test topology
 
 ## Tests
@@ -224,7 +333,22 @@ decisions behind the collection:
 ansible-lint
 ANSIBLE_TEST_PREFER_PODMAN=1 ansible-test sanity --docker --python 3.12
 ANSIBLE_TEST_PREFER_PODMAN=1 ansible-test units  --docker --python 3.12
-molecule test
+molecule test                       # the default (object-module) scenario
+```
+
+Integration runs against rootless Podman across Debian, Fedora, openSUSE and
+Ubuntu. There are five Molecule scenarios; select one with `-s`:
+
+- `default` — the object/info modules against a single provisioned DC
+- `provision` — `samba_provision`
+- `join_dc` — `samba_join_dc` (multi-host: DC + joining DC pairs)
+- `join_member` — `samba_join_member` (multi-host; proves RFC2307 uid resolution
+  via winbind)
+- `join_sssd` — `samba_join_sssd` (multi-host; proves RFC2307 uid resolution via
+  SSSD)
+
+```bash
+molecule test -s join_member
 ```
 
 ## License
