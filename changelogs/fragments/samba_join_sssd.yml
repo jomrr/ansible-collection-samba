@@ -1,3 +1,7 @@
 ---
 minor_changes:
-  - New module samba_join_sssd to join a host to an existing domain via adcli, writing a Kerberos keytab for SSSD (state=present only; runs locally on the joining host; binary idempotency via adcli testjoin; the join password is fed to adcli on stdin, never on the command line).
+  - >-
+    New module samba_join_sssd to join a host to an existing domain via adcli,
+    writing a Kerberos keytab for SSSD (state=present only; runs locally on the
+    joining host; binary idempotency via adcli testjoin; the join password is fed
+    to adcli on stdin, never on the command line).

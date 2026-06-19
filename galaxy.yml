@@ -40,3 +40,6 @@ build_ignore:
   - .pytest_cache
   - "*/.pytest_cache"
   - tests/output
+  # transient changelog fragments (build-only input, consumed at release time);
+  # the generated changelogs/changelog.yaml and CHANGELOG.rst still ship
+  - changelogs/fragments

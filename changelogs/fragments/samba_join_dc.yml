@@ -1,3 +1,7 @@
 ---
 minor_changes:
-  - New module samba_join_dc to join a host to an existing domain as an additional Samba AD domain controller (state=present only; runs locally on the joining host; binary idempotency with a three-way discriminator that refuses to overwrite a DC of a different domain).
+  - >-
+    New module samba_join_dc to join a host to an existing domain as an additional
+    Samba AD domain controller (state=present only; runs locally on the joining
+    host; binary idempotency with a three-way discriminator that refuses to
+    overwrite a DC of a different domain).

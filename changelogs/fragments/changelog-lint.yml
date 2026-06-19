@@ -1,0 +1,9 @@
+---
+bugfixes:
+  - >-
+    Changelog hygiene - wrap the over-long single-line changelog fragment entries
+    as folded block scalars so each line stays within the 160-character limit, and
+    stop shipping the transient changelogs/fragments directory in the release
+    artifact (it is build-only input, consumed at release time). Fixes
+    yaml[line-length] findings a consumer saw when linting the installed
+    collection. No changelog text changed.

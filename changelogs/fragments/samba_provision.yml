@@ -1,3 +1,6 @@
 ---
 minor_changes:
-  - New module samba_provision to provision the first Samba AD domain controller of a new domain (state=present only; runs locally on the future DC; binary idempotency, never re-provisions an existing domain).
+  - >-
+    New module samba_provision to provision the first Samba AD domain controller of
+    a new domain (state=present only; runs locally on the future DC; binary
+    idempotency, never re-provisions an existing domain).

@@ -5,5 +5,9 @@
 profile: production
 
 exclude_paths:
-  - changelogs/
+  # Exclude only the generated changelog artifacts (their YAML style is the
+  # antsibull-changelog serializer's, not ours to edit); the authored
+  # changelogs/fragments/ are linted.
+  - changelogs/changelog.yaml
+  - changelogs/.plugin-cache.yaml
   - .github/
