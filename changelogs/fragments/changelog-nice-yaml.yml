@@ -1,0 +1,9 @@
+---
+bugfixes:
+  - >-
+    Changelog generation - enable changelog_nice_yaml in changelogs/config.yaml so
+    the generated changelogs/changelog.yaml is indented the way yamllint and
+    ansible-lint expect (and carries a --- header). This removes the
+    yaml[indentation] findings a consumer saw when linting the installed
+    collection, without excluding the file from linting. Changelog content is
+    unchanged (formatting only).

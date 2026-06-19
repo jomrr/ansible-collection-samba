@@ -5,9 +5,6 @@
 profile: production
 
 exclude_paths:
-  # Exclude only the generated changelog artifacts (their YAML style is the
-  # antsibull-changelog serializer's, not ours to edit); the authored
-  # changelogs/fragments/ are linted.
-  - changelogs/changelog.yaml
-  - changelogs/.plugin-cache.yaml
+  # GitHub Actions workflows are not Ansible content. All of changelogs/ now
+  # passes lint (changelog.yaml via changelog_nice_yaml in changelogs/config.yaml).
   - .github/
