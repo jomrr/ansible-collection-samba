@@ -296,17 +296,34 @@
       loop_control:
         label: "{{ item.item.name }} {{ item.item.type }}"
 
-    - name: Verify | Read back the removed DNS record
+    - name: Verify | Read back the name whose record was removed and re-created
       jomrr.samba.samba_dns_record_info:
         zone: "{{ samba_dns_zone }}"
         name: dnsdel
         type: A
-      register: _dns_removed
+      register: _dns_recreated
 
-    - name: Verify | The removed DNS record is gone
+    - name: Verify | Only the re-created record is present (the removed one is gone)
       ansible.builtin.assert:
         that:
-          - _dns_removed.records | length == 0
+          - _dns_recreated.records | map(attribute='value') | list == ["192.0.2.98"]
+
+    - name: Verify | Resolve the re-created name through the DNS server
+      # The resolver points at the local samba DNS (prepare.yml). Had the node
+      # stayed tombstoned after the removal, the server would answer NXDOMAIN
+      # (getent rc 2) although the record is stored.
+      ansible.builtin.command:
+        argv:
+          - getent
+          - ahostsv4
+          - "dnsdel.{{ samba_dns_zone }}"
+      register: _dns_resolved
+      changed_when: false
+
+    - name: Verify | The re-created record resolves to its new address
+      ansible.builtin.assert:
+        that:
+          - _dns_resolved.stdout is match('192\.0\.2\.98\s')
 
     # Zones are read back through samba_dns_zone_info (the LDB read mirror of
     # samba_dns_zone), the same pattern as the other modules - replacing the

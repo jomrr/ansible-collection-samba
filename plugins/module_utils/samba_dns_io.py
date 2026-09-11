@@ -25,6 +25,11 @@ _NAME_DATA_TYPES = {"A", "AAAA", "CNAME", "PTR", "NS"}
 #: TXT strings are joined with NUL for matching, so a multi-string record can
 #: never accidentally compare equal to a single-string one.
 _TXT_SEP = "\x00"
+#: The node filter the DNS server itself uses (``dns_common_lookup``): when the
+#: last record of a name is removed, samba keeps the dnsNode as a tombstone
+#: (``dNSTombstoned=TRUE``) and never answers it, so every read here treats such
+#: a node as absent.
+LIVE_NODE_FILTER = "(&(objectClass=dnsNode)(!(dNSTombstoned=TRUE)))"
 
 
 def load_dnsp():
@@ -154,10 +159,14 @@ def list_zone_entries(samdb, zone=None):
 
 
 def read_node_specs(samdb, node_dn):
-    """Return the managed record specs at ``node_dn``, or None if it is absent."""
+    """Return the managed record specs at ``node_dn``, or None if it is absent.
+
+    A tombstoned node (see :data:`LIVE_NODE_FILTER`) counts as absent, exactly
+    as the DNS server sees it.
+    """
     ldb = samba_user_io.load_ldb()
     try:
-        res = samdb.search(base=node_dn, scope=ldb.SCOPE_BASE, attrs=["dnsRecord"])
+        res = samdb.search(base=node_dn, scope=ldb.SCOPE_BASE, expression=LIVE_NODE_FILTER, attrs=["dnsRecord"])
     except ldb.LdbError as err:
         if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
             return None
@@ -187,7 +196,7 @@ def enumerate_zone_specs(samdb, zone_dn):
     res = samdb.search(
         base=zone_dn,
         scope=ldb.SCOPE_SUBTREE,
-        expression="(&(objectClass=dnsNode)(!(dNSTombstoned=TRUE)))",
+        expression=LIVE_NODE_FILTER,
         attrs=["dnsRecord"],
     )
     pairs = []

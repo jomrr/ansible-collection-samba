@@ -239,11 +239,15 @@ class SambaDnsRecordIO:
         """Build the dnsNode DN ``DC=<name>,<zone_dn>`` with the name escaped."""
         return samba_user_io.build_child_dn(self.samdb, "DC", name, self._zone_dn(zone))
 
-    def _read_raw(self, node_dn):
-        """Return the raw dnsRecord values of a node, or None if it is absent."""
+    def _read_node(self, node_dn):
+        """Return ``(raw dnsRecord values, tombstoned)`` of a node, or None if absent.
+
+        Unlike the read path this deliberately sees tombstoned nodes: ``add``
+        has to revive one rather than create a node that already exists.
+        """
         ldb = samba_user_io.load_ldb()
         try:
-            res = self.samdb.search(base=node_dn, scope=ldb.SCOPE_BASE, attrs=["dnsRecord"])
+            res = self.samdb.search(base=node_dn, scope=ldb.SCOPE_BASE, attrs=["dnsRecord", "dNSTombstoned"])
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
                 return None
@@ -251,7 +255,9 @@ class SambaDnsRecordIO:
         if len(res) == 0:
             return None
         element = res[0].get("dnsRecord")
-        return list(element) if element is not None else []
+        raw = list(element) if element is not None else []
+        tombstoned = (samba_user_io.first_value(res[0], "dNSTombstoned") or "").upper() == "TRUE"
+        return raw, tombstoned
 
     def zone_exists(self, zone):
         """True if the DNS zone exists."""
@@ -261,16 +267,38 @@ class SambaDnsRecordIO:
         """Return the managed record specs at ``name``, or None if name is absent."""
         return samba_dns_io.read_node_specs(self.samdb, self._node_dn(zone, name))
 
-    def _live_records(self, raw):
-        """Unpack raw values into records, dropping tombstones."""
+    def _unpack(self, raw):
+        """Unpack raw dnsRecord values into records (tombstones included)."""
         ndr = samba_dns_io.load_ndr()
         dnsp = samba_dns_io.load_dnsp()
-        records = []
-        for value in raw:
-            rec = ndr.ndr_unpack(dnsp.DnssrvRpcRecord, value)
-            if rec.wType != dnsp.DNS_TYPE_TOMBSTONE:
-                records.append(rec)
-        return records
+        return [ndr.ndr_unpack(dnsp.DnssrvRpcRecord, value) for value in raw]
+
+    def _live_records(self, raw):
+        """Unpack raw values into records, dropping tombstones."""
+        dnsp = samba_dns_io.load_dnsp()
+        return [rec for rec in self._unpack(raw) if rec.wType != dnsp.DNS_TYPE_TOMBSTONE]
+
+    def _revive(self, node_dn, raw, spec):
+        """Bring a tombstoned node back to life with the desired record on it.
+
+        When the last record of a name is removed, samba keeps the dnsNode as a
+        tombstone (``dNSTombstoned=TRUE`` plus a single tombstone record) instead
+        of deleting it, and the DNS server never answers such a node. Merely
+        appending a value would leave the flag set, so the records are replaced
+        (live ones kept, the tombstone dropped, the desired one added) and the
+        flag is cleared in one modify - the state samba's own
+        ``dns_common_replace`` writes when it revives a node.
+        """
+        ldb = samba_user_io.load_ldb()
+        ndr = samba_dns_io.load_ndr()
+        records = [rec for rec in self._live_records(raw) if not self._matches(rec, spec)]
+        records.append(samba_dns_io.build_record(spec))
+        message = ldb.Message(node_dn)
+        message["dnsRecord"] = ldb.MessageElement(
+            [ndr.ndr_pack(rec) for rec in records], ldb.FLAG_MOD_REPLACE, "dnsRecord"
+        )
+        message["dNSTombstoned"] = ldb.MessageElement("FALSE", ldb.FLAG_MOD_REPLACE, "dNSTombstoned")
+        self.samdb.modify(message)
 
     def _create_node(self, node_dn, spec):
         """Create a new dnsNode holding the single desired record."""
@@ -284,17 +312,18 @@ class SambaDnsRecordIO:
         self.samdb.add(message)
 
     def add(self, zone, name, spec):
-        """Add the record, creating the node if needed. Returns False if present.
+        """Add the record, creating or reviving the node if needed. Returns False if present.
 
-        An existing node is extended with a single ``dnsRecord`` value
+        An existing live node is extended with a single ``dnsRecord`` value
         (FLAG_MOD_ADD), so other records on the name - including the SOA at the
-        apex - are left untouched rather than rewritten.
+        apex - are left untouched rather than rewritten. A tombstoned node is
+        revived instead (see :meth:`_revive`).
         """
         ldb = samba_user_io.load_ldb()
         ndr = samba_dns_io.load_ndr()
         node_dn = self._node_dn(zone, name)
-        raw = self._read_raw(node_dn)
-        if raw is None:
+        node = self._read_node(node_dn)
+        if node is None:
             try:
                 self._create_node(node_dn, spec)
                 return True
@@ -303,9 +332,13 @@ class SambaDnsRecordIO:
                     raise
                 # Created concurrently between the read and the add; fall through
                 # to the modify path against the now-existing node.
-                raw = self._read_raw(node_dn)
-                if raw is None:
+                node = self._read_node(node_dn)
+                if node is None:
                     raise
+        raw, tombstoned = node
+        if tombstoned:
+            self._revive(node_dn, raw, spec)
+            return True
         if any(self._matches(rec, spec) for rec in self._live_records(raw)):
             return False
         message = ldb.Message(node_dn)
@@ -324,9 +357,10 @@ class SambaDnsRecordIO:
     def remove(self, zone, name, spec):
         """Remove the record. Returns False if it was already absent."""
         node_dn = self._node_dn(zone, name)
-        raw = self._read_raw(node_dn)
-        if raw is None:
+        node = self._read_node(node_dn)
+        if node is None:
             return False
+        raw, dummy_tombstoned = node
         kept = []
         removed = False
         for rec in self._live_records(raw):

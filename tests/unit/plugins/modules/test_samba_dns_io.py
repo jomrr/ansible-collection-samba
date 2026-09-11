@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
 
 
 class FakeDnsp:
@@ -115,3 +116,35 @@ def test_txt_multistring_joins_with_nul_so_it_differs_from_single():
     assert spec["value"] == "a\x00b"
     # A single-string "a" record must not compare equal to this.
     assert spec["value"] != "a"
+
+
+class FakeLdbError(Exception):
+    """Stand-in for ldb.LdbError."""
+
+
+class FakeLdb:
+    SCOPE_BASE = 0
+    ERR_NO_SUCH_OBJECT = 32
+    LdbError = FakeLdbError
+
+
+class CapturingSamDB:
+    """Captures the search parameters of read_node_specs; finds no node."""
+
+    def __init__(self):
+        self.captured = None
+
+    def search(self, base, scope, expression, attrs):
+        self.captured = {"base": base, "scope": scope, "expression": expression, "attrs": attrs}
+        return []
+
+
+def test_read_node_specs_treats_tombstoned_node_as_absent(monkeypatch):
+    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    samdb = CapturingSamDB()
+    assert samba_dns_io.read_node_specs(samdb, "DC=www,DC=example.com") is None
+    # The base-scope read carries the DNS server's own node filter, so a
+    # tombstoned node is absent for the module exactly as it is for the server.
+    assert samdb.captured["scope"] == FakeLdb.SCOPE_BASE
+    assert samdb.captured["expression"] == samba_dns_io.LIVE_NODE_FILTER
+    assert "(!(dNSTombstoned=TRUE))" in samdb.captured["expression"]

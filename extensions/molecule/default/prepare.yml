@@ -15,7 +15,10 @@
       # (/usr/sbin/krb5kdc) the daemon's mitkdc child fails to exec and takes the
       # whole `samba` process down, so no RPC/DNS service comes up. samba-winbind
       # provides the winbindd the AD DC daemon also launches.
-      Suse: [samba-ad-dc, samba-tool, samba-dsdb-modules, samba-client, samba-python3, python313-cryptography, krb5-client, krb5-server, samba-winbind]
+      # python3-cryptography is the unversioned name zypper resolves to the
+      # current default python flavor; a versioned python3XX-cryptography goes
+      # stale whenever Tumbleweed switches its default interpreter.
+      Suse: [samba-ad-dc, samba-tool, samba-dsdb-modules, samba-client, samba-python3, python3-cryptography, krb5-client, krb5-server, samba-winbind]
     samba_fqdn: "{{ inventory_hostname }}.{{ samba_realm | lower }}"
   module_defaults:
     group/jomrr.samba.all:
@@ -60,6 +63,17 @@
       ansible.builtin.command:
         cmd: zypper --non-interactive --gpg-auto-import-keys refresh
       changed_when: false
+      when: ansible_facts['os_family'] == "Suse"
+
+    - name: Prepare | Upgrade the rolling base image to the current snapshot (Suse family)
+      # Tumbleweed supports only whole-snapshot upgrades: installing today's
+      # packages onto a stale cached base image mixes library versions (seen as
+      # libngtcp2_crypto_gnutls lacking a libngtcp2 symbol, which broke samba's
+      # python import and therefore provisioning).
+      ansible.builtin.command:
+        cmd: zypper --non-interactive dist-upgrade --no-recommends
+      register: _zypper_dup
+      changed_when: "'Nothing to do.' not in _zypper_dup.stdout"
       when: ansible_facts['os_family'] == "Suse"
 
     - name: Prepare | Install Samba AD DC packages
@@ -117,6 +131,19 @@
           --adminpass={{ samba_admin_password }}
         creates: /var/lib/samba/private/sam.ldb
       no_log: true
+      register: _provision
+      failed_when: false
+
+    - name: Prepare | Report a failed provisioning without the admin password
+      # The provision task must stay no_log (the password sits on its command
+      # line), which also hides samba-tool's error text. Re-raise it here with
+      # the password redacted so a broken distro package set is diagnosable.
+      ansible.builtin.fail:
+        msg: >-
+          samba-tool domain provision failed (rc={{ _provision.rc }}):
+          {{ (_provision.stderr | default('') ~ ' | ' ~ _provision.stdout | default(''))
+             | replace(samba_admin_password, '***') }}
+      when: _provision.rc | default(0) != 0
 
     - name: Prepare | Install the generated krb5.conf
       ansible.builtin.copy:

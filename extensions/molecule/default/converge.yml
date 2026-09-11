@@ -295,6 +295,17 @@
         value: 192.0.2.99
         state: absent
 
+    - name: Converge | Re-create a record at the removed name
+      # Removing the last record of a name leaves a tombstoned dnsNode behind
+      # (samba never deletes the node). Adding at that name must revive the
+      # node, otherwise the DNS server keeps ignoring it; verify.yml resolves it.
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: dnsdel
+        type: A
+        value: 192.0.2.98
+        state: present
+
     - name: Converge | Absent on a non-existent DNS record is a no-op
       jomrr.samba.samba_dns_record:
         zone: "{{ samba_dns_zone }}"
