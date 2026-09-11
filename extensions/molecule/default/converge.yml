@@ -84,10 +84,26 @@
         enabled: true
         state: present
 
+    - name: Converge | Change an attribute on a disabled user without touching its state
+      # enabled is unset, so the account must stay disabled (no implicit re-enable).
+      jomrr.samba.samba_user:
+        username: staydisabled
+        display_name: New Disabled
+        state: present
+
     - name: Converge | Remove a user
       jomrr.samba.samba_user:
         username: todelete
         state: absent
+
+    - name: Converge | A computer account is never matched as a user (absent is a no-op)
+      # The DC's own machine account is objectClass=user too. The module must
+      # not see it, otherwise state=absent would delete the DC's account.
+      jomrr.samba.samba_user:
+        username: "{{ inventory_hostname | upper }}$"
+        state: absent
+      register: _computer_absent
+      failed_when: _computer_absent.changed
 
     - name: Converge | Absent on a non-existent user is a no-op
       jomrr.samba.samba_user:

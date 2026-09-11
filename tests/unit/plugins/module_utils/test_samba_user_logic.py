@@ -21,7 +21,7 @@ def make_params(**over):
         "display_name": None,
         "email": None,
         "description": None,
-        "enabled": True,
+        "enabled": None,
         "password": None,
         "state": "present",
     }
@@ -44,9 +44,14 @@ def make_current(**over):
     return current
 
 
-def test_build_desired_skips_unset_and_keeps_enabled():
+def test_build_desired_skips_unset_including_enabled():
     desired = logic.build_desired(make_params(given_name="Jane"))
-    assert desired == {"given_name": "Jane", "enabled": True}
+    assert desired == {"given_name": "Jane"}
+
+
+def test_build_desired_keeps_explicit_enabled():
+    assert logic.build_desired(make_params(enabled=True)) == {"enabled": True}
+    assert logic.build_desired(make_params(enabled=False)) == {"enabled": False}
 
 
 def test_plan_absent_on_missing_is_noop():
@@ -105,6 +110,36 @@ def test_plan_present_enable_toggle():
     assert planned["action"] == "modify"
     assert planned["enable_change"] is False
     assert planned["changed"] is True
+
+
+def test_plan_present_unset_enabled_leaves_disabled_account_alone():
+    # The offboarding guarantee: an attribute update never re-enables an account.
+    planned = logic.plan(
+        "present",
+        make_current(enabled=False, given_name="Old"),
+        logic.build_desired(make_params(given_name="New")),
+    )
+    assert planned["enable_change"] is None
+    assert planned["attr_changes"] == {"given_name": "New"}
+
+
+def test_plan_present_explicit_enabled_true_re_enables():
+    planned = logic.plan("present", make_current(enabled=False), logic.build_desired(make_params(enabled=True)))
+    assert planned["enable_change"] is True
+    assert planned["changed"] is True
+
+
+def test_plan_present_create_unset_enabled_needs_no_toggle():
+    # A new account comes up enabled; only an explicit enabled=false toggles.
+    planned = logic.plan("present", None, logic.build_desired(make_params()))
+    assert planned["enable_change"] is None
+
+
+def test_build_diff_create_reports_enabled_by_default():
+    desired = logic.build_desired(make_params(given_name="Jane"))
+    planned = logic.plan("present", None, desired)
+    diff = logic.build_diff("present", None, desired, planned)
+    assert diff["after"]["enabled"] is True
 
 
 def test_build_diff_present_modify():

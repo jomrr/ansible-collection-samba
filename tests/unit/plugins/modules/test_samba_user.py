@@ -83,7 +83,7 @@ def make_params(**over):
         "display_name": None,
         "email": None,
         "description": None,
-        "enabled": True,
+        "enabled": None,
         "password": None,
         "update_password": "on_create",
         "path": None,
@@ -168,6 +168,36 @@ def test_disable_existing_user():
     result = logic.run(make_params(enabled=False), False, fake)
     assert result["changed"] is True
     assert ("set_enabled", "CN=jdoe,CN=Users,DC=example,DC=com", False) in fake.calls
+
+
+def test_attribute_update_keeps_disabled_account_disabled():
+    # Offboarding guarantee: enabled is unset, so the state is not reconciled.
+    fake = FakeIO(current=existing_user(given_name="Old", enabled=False, _uac=514))
+    result = logic.run(make_params(given_name="New"), False, fake)
+    assert result["changed"] is True
+    assert "set_enabled" not in call_names(fake)
+    assert result["user"]["enabled"] is False
+
+
+def test_explicit_enabled_true_re_enables():
+    fake = FakeIO(current=existing_user(enabled=False, _uac=514))
+    result = logic.run(make_params(enabled=True), False, fake)
+    assert result["changed"] is True
+    assert ("set_enabled", "CN=jdoe,CN=Users,DC=example,DC=com", True) in fake.calls
+
+
+def test_create_without_enabled_is_enabled_and_toggles_nothing():
+    fake = FakeIO(current=None)
+    result = logic.run(make_params(password="S3cret!"), False, fake)
+    assert "set_enabled" not in call_names(fake)
+    assert result["user"]["enabled"] is True
+
+
+def test_create_disabled_toggles_after_create():
+    fake = FakeIO(current=None)
+    result = logic.run(make_params(password="S3cret!", enabled=False), False, fake)
+    assert ("set_enabled", "CN=jdoe,CN=Users,DC=example,DC=com", False) in fake.calls
+    assert result["user"]["enabled"] is False
 
 
 def test_absent_on_missing_is_noop():

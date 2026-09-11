@@ -19,7 +19,9 @@ description:
     (C(samba.samdb.SamDB)), not through C(samba-tool) subprocesses.
   - The module is idempotent and supports check mode. Only attributes that are
     explicitly set are compared and changed; unset attributes are left
-    untouched.
+    untouched, including the enabled state (see I(enabled)).
+  - Only user accounts (LDAP C(objectCategory=person)) are managed; computer
+    accounts are never matched, even by an exact C(sAMAccountName).
 author:
   - Jonas Mauer (@jomrr)
 requirements:
@@ -90,8 +92,10 @@ options:
       - Whether the account is enabled.
       - Mapped to the C(ACCOUNTDISABLE) bit of the C(userAccountControl)
         attribute.
+      - If omitted, a new account is created enabled and the state of an
+        existing account is left unchanged, like every other unset attribute.
+        Set C(true) or C(false) explicitly to enforce a state.
     type: bool
-    default: true
   password:
     description:
       - The password for the account.
@@ -140,6 +144,9 @@ seealso:
 notes:
   - This module must be executed on a Samba AD DC where the C(samba) Python
     bindings and the directory are available.
+  - Computer accounts are not managed by this module. A I(username) that names
+    a computer account matches nothing, so C(state=absent) never deletes a
+    computer object.
 """
 
 EXAMPLES = r"""
@@ -160,10 +167,15 @@ EXAMPLES = r"""
     username: jdoe
     enabled: false
 
-- name: Update only the display name (other attributes are left untouched)
+- name: Update only the display name (other attributes, including the enabled state, are left untouched)
   jomrr.samba.samba_user:
     username: jdoe
     display_name: Jane M. Doe
+
+- name: Ensure an existing account is enabled (explicit, enabled has no default)
+  jomrr.samba.samba_user:
+    username: jdoe
+    enabled: true
 
 - name: Set the RFC2307/POSIX attributes (domain provisioned with --use-rfc2307)
   jomrr.samba.samba_user:
@@ -295,7 +307,9 @@ class SambaUserIO:
     def read_current(self, username):
         """Return the normalized current state of ``username`` or ``None``."""
         ldb = self._ldb()
-        expression = "(&(objectClass=user)(sAMAccountName=%s))" % ldb.binary_encode(username)
+        # objectCategory=person keeps computer accounts (also objectClass=user)
+        # out, the same match samba_user_info uses.
+        expression = "(&(objectCategory=person)(objectClass=user)(sAMAccountName=%s))" % ldb.binary_encode(username)
         res = self.samdb.search(
             base=self.samdb.domain_dn(),
             scope=ldb.SCOPE_SUBTREE,
@@ -396,7 +410,7 @@ class SambaUserIO:
         before the write reached the DC.
         """
         ldb = self._ldb()
-        search_filter = "(sAMAccountName=%s)" % ldb.binary_encode(username)
+        search_filter = "(&(objectCategory=person)(sAMAccountName=%s))" % ldb.binary_encode(username)
         try:
             self.samdb.setpassword(search_filter, password)
         except ldb.LdbError as err:
@@ -452,7 +466,7 @@ def main():
         unix_home_directory=dict(type="str"),
         login_shell=dict(type="str"),
         gecos=dict(type="str"),
-        enabled=dict(type="bool", default=True),
+        enabled=dict(type="bool"),
         password=dict(type="str", no_log=True),
         update_password=dict(type="str", default="on_create", choices=["on_create", "always"]),
         path=dict(type="str"),

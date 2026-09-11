@@ -1,0 +1,8 @@
+---
+breaking_changes:
+  - >-
+    samba_user - C(enabled) no longer defaults to C(true). When omitted, a new
+    account is created enabled and the state of an existing account is left
+    unchanged, like every other unset attribute. Previously any task that
+    omitted C(enabled) enabled a disabled account again; playbooks that relied
+    on that implicit re-enable must now set C(enabled=true) explicitly.

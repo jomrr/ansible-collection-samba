@@ -58,17 +58,18 @@ _ACTION_LABEL = {
 def build_desired(params):
     """Build the desired-state dict from the module parameters.
 
-    Only simple attributes the caller actually set (non-``None``) are included,
-    so attributes the user did not mention are never diffed and therefore never
-    touched. ``enabled`` always carries a value (it has a default) and is always
-    present.
+    Only attributes the caller actually set (non-``None``) are included, so
+    attributes the user did not mention are never diffed and therefore never
+    touched. That holds for ``enabled`` too: left unset, an existing account
+    keeps its state and a new one is created enabled (samba's default).
     """
     desired = {}
     for name in ATTR_TO_LDAP:
         value = params.get(name)
         if value is not None:
             desired[name] = value
-    desired["enabled"] = params["enabled"]
+    if params.get("enabled") is not None:
+        desired["enabled"] = params["enabled"]
     return desired
 
 
@@ -90,7 +91,8 @@ def plan(state, current, desired):
 
     if current is None:
         attr_changes = {name: value for name, value in desired.items() if name != "enabled"}
-        enable_change = None if desired["enabled"] else False
+        # A new account comes up enabled; only an explicit enabled=false needs a toggle.
+        enable_change = False if desired.get("enabled") is False else None
         return {"action": "create", "attr_changes": attr_changes, "enable_change": enable_change, "changed": True}
 
     attr_changes = {}
@@ -99,7 +101,9 @@ def plan(state, current, desired):
             continue
         if current.get(name) != value:
             attr_changes[name] = value
-    enable_change = desired["enabled"] if current.get("enabled") != desired["enabled"] else None
+    enable_change = None
+    if "enabled" in desired and current.get("enabled") != desired["enabled"]:
+        enable_change = desired["enabled"]
     changed = bool(attr_changes) or enable_change is not None
     return {
         "action": "modify" if changed else "none",
@@ -122,7 +126,7 @@ def _effective_fields(current, desired, planned):
         fields = _managed_fields(current)
     else:
         fields = {name: None for name in ATTR_TO_LDAP}
-        fields["enabled"] = desired["enabled"]
+        fields["enabled"] = desired.get("enabled", True)
     fields.update(planned["attr_changes"])
     if planned["enable_change"] is not None:
         fields["enabled"] = planned["enable_change"]

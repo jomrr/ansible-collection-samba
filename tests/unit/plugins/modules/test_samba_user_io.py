@@ -129,6 +129,16 @@ def test_read_current_escapes_filter_value():
     assert samdb.captured["scope"] == fake_ldb.SCOPE_SUBTREE
 
 
+def test_read_current_matches_only_user_accounts():
+    fake_ldb = FakeLdb()
+    samdb = FakeSamDB(search_result=[])
+    make_io(fake_ldb, samdb).read_current("DC1$")
+    # Computer accounts carry objectClass=user too; the objectCategory clause
+    # keeps them out, exactly like samba_user_info's query.
+    assert "(objectCategory=person)" in samdb.captured["expression"]
+    assert "(objectClass=user)" in samdb.captured["expression"]
+
+
 def test_read_current_absent_returns_none():
     assert make_io(FakeLdb(), FakeSamDB(search_result=[])).read_current("ghost") is None
 
@@ -196,7 +206,8 @@ def test_set_password_escapes_filter_value():
     make_io(fake_ldb, samdb).set_password("evil)(uid=*)", "pw")
     # The raw value was passed through the escaper before entering the filter.
     assert fake_ldb.encoded == ["evil)(uid=*)"]
-    assert samdb.setpassword_filters == ["(sAMAccountName=%s)" % ("ESC(%s)" % "evil)(uid=*)")]
+    # User accounts only (objectCategory=person), same as read_current.
+    assert samdb.setpassword_filters == ["(&(objectCategory=person)(sAMAccountName=%s))" % ("ESC(%s)" % "evil)(uid=*)")]
 
 
 def test_set_password_vanished_raises_clean():

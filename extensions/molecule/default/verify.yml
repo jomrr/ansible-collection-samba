@@ -70,6 +70,17 @@
         that:
           - _toenable.users[0].enabled is true
 
+    - name: Verify | Read the disabled user whose attribute was changed
+      jomrr.samba.samba_user_info:
+        username: staydisabled
+      register: _staydisabled
+
+    - name: Verify | The attribute changed and the account stayed disabled
+      ansible.builtin.assert:
+        that:
+          - _staydisabled.users[0].display_name == "New Disabled"
+          - _staydisabled.users[0].enabled is false
+
     - name: Verify | Read the deleted user
       jomrr.samba.samba_user_info:
         username: todelete

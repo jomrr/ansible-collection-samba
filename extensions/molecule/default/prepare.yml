@@ -227,6 +227,14 @@
             password: "{{ _seed_password }}"
             state: present
 
+        - name: Prepare | seed | disabled user whose attribute converge will change
+          jomrr.samba.samba_user:
+            username: staydisabled
+            display_name: Old Disabled
+            enabled: false
+            password: "{{ _seed_password }}"
+            state: present
+
         - name: Prepare | seed | user whose several attributes converge will change
           jomrr.samba.samba_user:
             username: multiattr
