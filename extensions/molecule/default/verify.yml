@@ -50,6 +50,17 @@
           - _multiattr.users[0].email == "multi.user@example.com"
           - _multiattr.users[0].description == "New multi description"
 
+    - name: Verify | Read the user whose attributes were removed
+      jomrr.samba.samba_user_info:
+        username: clearattr
+      register: _clearattr
+
+    - name: Verify | The removed attributes are gone
+      ansible.builtin.assert:
+        that:
+          - _clearattr.users[0].display_name is none
+          - _clearattr.users[0].description is none
+
     - name: Verify | Read the disabled user
       jomrr.samba.samba_user_info:
         username: todisable
@@ -271,6 +282,23 @@
         that:
           - _gplaced.groups[0].dn | lower is search('ou=loc_a')
           - _gmover.groups[0].dn | lower is search('ou=loc_b')
+
+    - name: Verify | Read the group whose description was removed
+      jomrr.samba.samba_group_info:
+        name: gclear
+      register: _gclear
+
+    - name: Verify | Read the OU whose description was removed
+      jomrr.samba.samba_ou_info:
+        name: ouclear
+        path: "{{ samba_base_dn }}"
+      register: _ouclear
+
+    - name: Verify | The removed descriptions are gone
+      ansible.builtin.assert:
+        that:
+          - _gclear.groups[0].description is none
+          - _ouclear.ous[0].description is none
 
     # DNS records are read back through samba_dns_record_info (the read mirror of
     # samba_dns_record, same local-SamDB path). Values are asserted in the DC's

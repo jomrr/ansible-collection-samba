@@ -12,6 +12,8 @@ the unit tests run without the samba bindings.
 
 from __future__ import annotations
 
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_user_logic import same_value
+
 
 class SambaGroupError(Exception):
     """User-facing error the module turns into ``fail_json``."""
@@ -117,15 +119,17 @@ def plan(state, current, desired):
 
     if current is None:
         attr_changes = {}
-        if "description" in desired:
+        # Removing the description (empty string) is a no-op on a new group.
+        if desired.get("description"):
             attr_changes["description"] = desired["description"]
         if "gid_number" in desired:
             attr_changes["gid_number"] = desired["gid_number"]
         return {"action": "create", "attr_changes": attr_changes, "changed": True}
 
     attr_changes = {}
-    if "description" in desired and current.get("description") != desired["description"]:
-        attr_changes["description"] = desired["description"]
+    if "description" in desired and not same_value(current.get("description"), desired["description"]):
+        # ``None`` means "remove the attribute" (the caller's empty string).
+        attr_changes["description"] = desired["description"] or None
     if "gid_number" in desired and current.get("gid_number") != desired["gid_number"]:
         attr_changes["gid_number"] = desired["gid_number"]
     if not _same_group_type(current["group_type"], desired["group_type"]):
@@ -177,7 +181,7 @@ def _effective_state(current, desired, planned, member_diff):
         gid_number = current.get("gid_number")
     else:
         group_type_value = desired["group_type"]
-        description = desired.get("description")
+        description = desired.get("description") or None
         gid_number = desired.get("gid_number")
     if "group_type" in planned["attr_changes"]:
         group_type_value = planned["attr_changes"]["group_type"]
@@ -294,7 +298,7 @@ def run(params, check_mode, io):
         raise SambaGroupError("path '%s' does not exist; create it first" % path)
 
     if planned["action"] == "create":
-        io.create_group(name, desired["group_type"], desired.get("description"))
+        io.create_group(name, desired["group_type"], desired.get("description") or None)
         current = io.read_current(name)
 
     if current is None:

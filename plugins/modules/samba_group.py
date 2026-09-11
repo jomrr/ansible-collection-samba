@@ -53,6 +53,7 @@ options:
     description:
       - A free-form description of the group, mapped to the LDAP C(description)
         attribute.
+      - Set to an empty string to remove the description.
     type: str
   gid_number:
     description:
@@ -258,12 +259,23 @@ class SambaGroupIO:
             raise
 
     def set_description(self, dn, description):
-        """Replace the description attribute, mapping a vanished object cleanly."""
+        """Replace the description, or remove it when ``description`` is None.
+
+        Removing a description that is already gone is an idempotent no-op; a
+        vanished object fails cleanly.
+        """
         ldb = samba_user_io.load_ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
-        message["description"] = ldb.MessageElement(description, ldb.FLAG_MOD_REPLACE, "description")
-        self._modify(message, dn)
+        if description is None:
+            message["description"] = ldb.MessageElement([], ldb.FLAG_MOD_DELETE, "description")
+        else:
+            message["description"] = ldb.MessageElement(description, ldb.FLAG_MOD_REPLACE, "description")
+        try:
+            self._modify(message, dn)
+        except ldb.LdbError as err:
+            if description is not None or err.args[0] != ldb.ERR_NO_SUCH_ATTRIBUTE:
+                raise
 
     def set_gid_number(self, dn, gid_number):
         """Replace the gidNumber (RFC2307 POSIX gid), written as decimal text.

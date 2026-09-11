@@ -138,3 +138,29 @@ def test_check_mode_delete_does_not_write():
     result = logic.run(make_params(state="absent"), True, fake)
     assert result["changed"] is True
     assert "delete_ou" not in call_names(fake)
+
+
+# --- removing the description (empty string) ---
+
+def test_empty_description_removes_it_and_reads_back_none():
+    fake = FakeIO(current=existing_ou(description="old"))
+    result = logic.run(make_params(description=""), False, fake)
+    assert result["changed"] is True
+    assert "set_description" in call_names(fake)
+    assert fake.current["description"] is None
+    assert result["ou"]["description"] is None
+
+
+def test_empty_description_on_absent_is_idempotent():
+    fake = FakeIO(current=existing_ou(description=None))
+    result = logic.run(make_params(description=""), False, fake)
+    assert result["changed"] is False
+    assert "set_description" not in call_names(fake)
+
+
+def test_create_with_empty_description_passes_none():
+    fake = FakeIO(current=None)
+    result = logic.run(make_params(description=""), False, fake)
+    assert result["changed"] is True
+    assert fake.current["description"] is None
+    assert result["ou"]["description"] is None

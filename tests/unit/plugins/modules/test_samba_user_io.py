@@ -37,6 +37,9 @@ class FakeLdb:
     SCOPE_SUBTREE = 2
     SCOPE_BASE = 0
     FLAG_MOD_REPLACE = 2
+    FLAG_MOD_DELETE = 3
+    ERR_NO_SUCH_ATTRIBUTE = 16
+    ERR_CONSTRAINT_VIOLATION = 19
     ERR_NO_SUCH_OBJECT = 32
     ERR_ENTRY_ALREADY_EXISTS = 68
     LdbError = FakeLdbError
@@ -72,17 +75,14 @@ class FoundMessage:
 class FakeSamDB:
     """Configurable fake SamDB; raise_* inject errors for the race tests."""
 
-    def __init__(self, search_result=None, newuser_error=None, modify_error=None,
-                 delete_error=None, setpassword_error=None):
+    def __init__(self, search_result=None, newuser_error=None, modify_error=None, delete_error=None):
         self.search_result = [] if search_result is None else search_result
         self.newuser_error = newuser_error
         self.modify_error = modify_error
         self.delete_error = delete_error
-        self.setpassword_error = setpassword_error
         self.captured = {}
         self.modified = []
         self.deleted = []
-        self.setpassword_filters = []
 
     def domain_dn(self):
         return "DC=example,DC=com"
@@ -104,12 +104,6 @@ class FakeSamDB:
         if self.delete_error is not None:
             raise self.delete_error
         self.deleted.append(dn)
-
-    def setpassword(self, search_filter, password):
-        if self.setpassword_error is not None:
-            raise self.setpassword_error
-        # Record only the filter, never the password.
-        self.setpassword_filters.append(search_filter)
 
 
 def make_io(fake_ldb, samdb):
@@ -200,28 +194,48 @@ def test_delete_user_success_returns_true():
     assert samdb.deleted  # delete actually issued
 
 
-def test_set_password_escapes_filter_value():
-    fake_ldb = FakeLdb()
+def test_set_password_writes_unicode_pwd_by_dn():
     samdb = FakeSamDB()
-    make_io(fake_ldb, samdb).set_password("evil)(uid=*)", "pw")
-    # The raw value was passed through the escaper before entering the filter.
-    assert fake_ldb.encoded == ["evil)(uid=*)"]
-    # User accounts only (objectCategory=person), same as read_current.
-    assert samdb.setpassword_filters == ["(&(objectCategory=person)(sAMAccountName=%s))" % ("ESC(%s)" % "evil)(uid=*)")]
+    make_io(FakeLdb(), samdb).set_password("CN=jdoe,DC=example,DC=com", "pw")
+    assert samdb.modified[0].dn == ("DN", "CN=jdoe,DC=example,DC=com")
+    # samba's own encoding: the password in double quotes as UTF-16LE.
+    assert samdb.modified[0].elements["unicodePwd"] == ('"pw"'.encode("utf-16-le"), FakeLdb.FLAG_MOD_REPLACE, "unicodePwd")
 
 
 def test_set_password_vanished_raises_clean():
-    fake_ldb = FakeLdb()
-    samdb = FakeSamDB(setpassword_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
+    # Written by DN, a concurrently removed user is ERR_NO_SUCH_OBJECT (an
+    # error code, not the plain Exception samba's setpassword() raises).
+    samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
     with pytest.raises(logic.SambaUserError):
-        make_io(fake_ldb, samdb).set_password("jdoe", "pw")
+        make_io(FakeLdb(), samdb).set_password("CN=jdoe,DC=example,DC=com", "pw")
+
+
+def test_set_password_policy_rejection_raises_clean():
+    samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_CONSTRAINT_VIOLATION, "0000052D: too short"))
+    with pytest.raises(logic.SambaUserError):
+        make_io(FakeLdb(), samdb).set_password("CN=jdoe,DC=example,DC=com", "pw")
 
 
 def test_set_password_other_ldberror_propagates():
-    fake_ldb = FakeLdb()
-    samdb = FakeSamDB(setpassword_error=FakeLdbError(999, "boom"))
+    samdb = FakeSamDB(modify_error=FakeLdbError(999, "boom"))
     with pytest.raises(FakeLdbError):
-        make_io(fake_ldb, samdb).set_password("jdoe", "pw")
+        make_io(FakeLdb(), samdb).set_password("CN=jdoe,DC=example,DC=com", "pw")
+
+
+# --- removing attributes (empty string) ---
+
+def test_apply_attrs_clears_with_an_empty_delete():
+    samdb = FakeSamDB()
+    make_io(FakeLdb(), samdb).apply_attrs("CN=jdoe,DC=example,DC=com", {"given_name": "Jane", "description": None})
+    # The replace goes in one modify, the removal in its own (so an attribute
+    # that is already gone cannot fail the replace).
+    assert samdb.modified[0].elements == {"givenName": ("Jane", FakeLdb.FLAG_MOD_REPLACE, "givenName")}
+    assert samdb.modified[1].elements == {"description": ([], FakeLdb.FLAG_MOD_DELETE, "description")}
+
+
+def test_apply_attrs_clear_of_absent_attribute_is_noop():
+    samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_ATTRIBUTE, "no such attribute"))
+    make_io(FakeLdb(), samdb).apply_attrs("CN=jdoe,DC=example,DC=com", {"description": None})
 
 
 # --- RFC2307/POSIX attributes ---

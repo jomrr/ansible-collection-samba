@@ -166,6 +166,23 @@ def test_set_group_type_invalid_transition_raises_clean():
         make_io(samdb).set_group_type("CN=g,DC=example,DC=com", logic.group_type("universal", "security"))
 
 
+def test_set_description_none_removes_the_attribute():
+    samdb = FakeSamDB()
+    make_io(samdb).set_description("CN=g,DC=example,DC=com", None)
+    assert samdb.modified[0].elements["description"] == ([], FakeLdb.FLAG_MOD_DELETE, "description")
+
+
+def test_set_description_remove_of_absent_attribute_is_noop():
+    samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_ATTRIBUTE, "no such attribute"))
+    make_io(samdb).set_description("CN=g,DC=example,DC=com", None)
+
+
+def test_set_description_replace_does_not_swallow_no_such_attribute():
+    samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_ATTRIBUTE, "odd"))
+    with pytest.raises(FakeLdbError):
+        make_io(samdb).set_description("CN=g,DC=example,DC=com", "new")
+
+
 def test_set_gid_number_writes_decimal_string():
     samdb = FakeSamDB()
     make_io(samdb).set_gid_number("CN=g,DC=example,DC=com", 10000)

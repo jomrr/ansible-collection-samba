@@ -69,3 +69,30 @@ def test_build_diff_present_modify():
     diff = logic.build_diff("present", current, desired, planned)
     assert diff["before"]["description"] == "old"
     assert diff["after"]["description"] == "new"
+
+
+# --- removing the description (empty string) ---
+
+def test_plan_empty_string_removes_description():
+    planned = logic.plan("present", make_current(description="old"), logic.build_desired(make_params(description="")))
+    assert planned["attr_changes"] == {"description": None}
+    assert planned["changed"] is True
+
+
+def test_plan_empty_string_on_absent_description_is_idempotent():
+    planned = logic.plan("present", make_current(description=None), logic.build_desired(make_params(description="")))
+    assert planned["changed"] is False
+
+
+def test_plan_create_skips_empty_description():
+    planned = logic.plan("present", None, logic.build_desired(make_params(description="")))
+    assert planned["attr_changes"] == {}
+
+
+def test_build_diff_shows_removed_description_as_none():
+    current = make_current(description="old")
+    desired = logic.build_desired(make_params(description=""))
+    planned = logic.plan("present", current, desired)
+    diff = logic.build_diff("present", current, desired, planned)
+    assert diff["before"]["description"] == "old"
+    assert diff["after"]["description"] is None

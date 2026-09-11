@@ -54,6 +54,13 @@
         description: New multi description
         state: present
 
+    - name: Converge | Remove attributes from an existing user (empty string)
+      jomrr.samba.samba_user:
+        username: clearattr
+        display_name: ""
+        description: ""
+        state: present
+
     - name: Converge | Create a user with the full RFC2307/POSIX attribute set
       jomrr.samba.samba_user:
         username: posixuser
@@ -225,6 +232,19 @@
       jomrr.samba.samba_group:
         name: gmover
         path: "OU=loc_b,{{ samba_base_dn }}"
+        state: present
+
+    - name: Converge | Remove a group's description (empty string)
+      jomrr.samba.samba_group:
+        name: gclear
+        description: ""
+        state: present
+
+    - name: Converge | Remove an OU's description (empty string)
+      jomrr.samba.samba_ou:
+        name: ouclear
+        path: "{{ samba_base_dn }}"
+        description: ""
         state: present
 
     - name: Converge | Create a group with a member directly in an OU (path + members)

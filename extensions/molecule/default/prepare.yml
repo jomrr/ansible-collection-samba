@@ -357,6 +357,27 @@
             path: "OU=loc_a,{{ samba_base_dn }}"
             state: present
 
+        - name: Prepare | seed | user whose attributes converge will remove
+          jomrr.samba.samba_user:
+            username: clearattr
+            display_name: To Be Removed
+            description: To be removed as well
+            password: "{{ _seed_password }}"
+            state: present
+
+        - name: Prepare | seed | group whose description converge will remove
+          jomrr.samba.samba_group:
+            name: gclear
+            description: To be removed
+            state: present
+
+        - name: Prepare | seed | OU whose description converge will remove
+          jomrr.samba.samba_ou:
+            name: ouclear
+            path: "{{ samba_base_dn }}"
+            description: To be removed
+            state: present
+
         - name: Prepare | seed | DNS A record converge will remove
           jomrr.samba.samba_dns_record:
             zone: "{{ samba_dns_zone }}"

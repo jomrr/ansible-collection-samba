@@ -42,6 +42,7 @@ options:
     description:
       - A free-form description of the OU, mapped to the LDAP C(description)
         attribute.
+      - Set to an empty string to remove the description.
     type: str
   state:
     description:
@@ -184,16 +185,25 @@ class SambaOuIO:
             raise
 
     def set_description(self, dn, description):
-        """Replace the description, mapping a vanished object to a clear error."""
+        """Replace the description, or remove it when ``description`` is None.
+
+        Removing a description that is already gone is an idempotent no-op; a
+        vanished object maps to a clear error.
+        """
         ldb = samba_user_io.load_ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
-        message["description"] = ldb.MessageElement(description, ldb.FLAG_MOD_REPLACE, "description")
+        if description is None:
+            message["description"] = ldb.MessageElement([], ldb.FLAG_MOD_DELETE, "description")
+        else:
+            message["description"] = ldb.MessageElement(description, ldb.FLAG_MOD_REPLACE, "description")
         try:
             self.samdb.modify(message)
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
                 raise logic.SambaOuError("OU '%s' vanished before it could be modified" % dn)
+            if description is None and err.args[0] == ldb.ERR_NO_SUCH_ATTRIBUTE:
+                return
             raise
 
     def delete_ou(self, dn):

@@ -55,13 +55,26 @@ _ACTION_LABEL = {
 }
 
 
+def same_value(current_value, desired_value):
+    """Attribute equality where an empty desired string means "absent".
+
+    An empty string is the caller's way to remove an attribute; a removed
+    attribute reads back as ``None``, so the two must compare equal or a run
+    that clears an attribute would never become idempotent.
+    """
+    if desired_value == "":
+        return current_value is None
+    return current_value == desired_value
+
+
 def build_desired(params):
     """Build the desired-state dict from the module parameters.
 
     Only attributes the caller actually set (non-``None``) are included, so
     attributes the user did not mention are never diffed and therefore never
     touched. That holds for ``enabled`` too: left unset, an existing account
-    keeps its state and a new one is created enabled (samba's default).
+    keeps its state and a new one is created enabled (samba's default). An
+    empty string is kept as the request to remove the attribute.
     """
     desired = {}
     for name in ATTR_TO_LDAP:
@@ -90,7 +103,8 @@ def plan(state, current, desired):
         return {"action": "delete", "attr_changes": {}, "enable_change": None, "changed": True}
 
     if current is None:
-        attr_changes = {name: value for name, value in desired.items() if name != "enabled"}
+        # Removing an attribute (empty string) is a no-op on a new account.
+        attr_changes = {name: value for name, value in desired.items() if name != "enabled" and value != ""}
         # A new account comes up enabled; only an explicit enabled=false needs a toggle.
         enable_change = False if desired.get("enabled") is False else None
         return {"action": "create", "attr_changes": attr_changes, "enable_change": enable_change, "changed": True}
@@ -99,8 +113,9 @@ def plan(state, current, desired):
     for name, value in desired.items():
         if name == "enabled":
             continue
-        if current.get(name) != value:
-            attr_changes[name] = value
+        if not same_value(current.get(name), value):
+            # ``None`` in attr_changes means "remove the attribute".
+            attr_changes[name] = None if value == "" else value
     enable_change = None
     if "enabled" in desired and current.get("enabled") != desired["enabled"]:
         enable_change = desired["enabled"]
@@ -280,7 +295,7 @@ def run(params, check_mode, io):
     if planned["enable_change"] is not None:
         io.set_enabled(current["_dn"], current["_uac"], planned["enable_change"])
     if set_pw_on_existing:
-        io.set_password(username, password)
+        io.set_password(current["_dn"], password)
 
     result["user"] = public_state(io.read_current(username), username)
     return result

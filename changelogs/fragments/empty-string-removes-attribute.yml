@@ -1,0 +1,10 @@
+---
+bugfixes:
+  - >-
+    samba_user, samba_group, samba_ou - an empty string for a string attribute
+    (for example C(description="")) crashed with an ldb "empty attribute"
+    error, and there was no way to remove an attribute that had been set.
+    An empty string now removes the attribute; an attribute that is already
+    absent compares equal to it, so the run is idempotent. Removing is a no-op
+    when creating an object. The POSIX integer attributes of samba_user cannot
+    be removed this way.

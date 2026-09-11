@@ -274,7 +274,23 @@ def test_always_existing_user_sets_password_and_changes():
     )
     assert result["changed"] is True
     assert result["action"] == "modified"
-    assert ("set_password", "jdoe", "S3cret!") in fake.calls
+    # The password is set by DN (the object that was read), never by a name lookup.
+    assert ("set_password", "CN=jdoe,CN=Users,DC=example,DC=com", "S3cret!") in fake.calls
+
+
+def test_empty_string_removes_attribute_and_reads_back_none():
+    fake = FakeIO(current=existing_user(description="old"))
+    result = logic.run(make_params(description=""), False, fake)
+    assert result["changed"] is True
+    assert ("apply_attrs", "CN=jdoe,CN=Users,DC=example,DC=com", {"description": None}) in fake.calls
+    assert result["user"]["description"] is None
+
+
+def test_empty_string_on_absent_attribute_is_idempotent():
+    fake = FakeIO(current=existing_user(description=None))
+    result = logic.run(make_params(description=""), False, fake)
+    assert result["changed"] is False
+    assert call_names(fake) == ["read_current"]
 
 
 def test_always_existing_user_check_mode_no_write_but_changed():

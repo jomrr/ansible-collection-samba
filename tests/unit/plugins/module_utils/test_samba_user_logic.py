@@ -54,6 +54,33 @@ def test_build_desired_keeps_explicit_enabled():
     assert logic.build_desired(make_params(enabled=False)) == {"enabled": False}
 
 
+# --- removing attributes (empty string) ---
+
+def test_plan_empty_string_removes_a_set_attribute():
+    planned = logic.plan("present", make_current(given_name="Old"), logic.build_desired(make_params(given_name="")))
+    assert planned["attr_changes"] == {"given_name": None}
+    assert planned["changed"] is True
+
+
+def test_plan_empty_string_on_absent_attribute_is_idempotent():
+    planned = logic.plan("present", make_current(given_name=None), logic.build_desired(make_params(given_name="")))
+    assert planned["changed"] is False
+
+
+def test_plan_create_skips_empty_strings():
+    planned = logic.plan("present", None, logic.build_desired(make_params(given_name="", surname="Doe")))
+    assert planned["attr_changes"] == {"surname": "Doe"}
+
+
+def test_build_diff_shows_removed_attribute_as_none():
+    current = make_current(given_name="Old")
+    desired = logic.build_desired(make_params(given_name=""))
+    planned = logic.plan("present", current, desired)
+    diff = logic.build_diff("present", current, desired, planned)
+    assert diff["before"]["given_name"] == "Old"
+    assert diff["after"]["given_name"] is None
+
+
 def test_plan_absent_on_missing_is_noop():
     planned = logic.plan("absent", None, logic.build_desired(make_params(state="absent")))
     assert planned["action"] == "none"

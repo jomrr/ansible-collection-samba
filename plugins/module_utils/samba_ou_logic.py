@@ -13,6 +13,8 @@ bindings.
 
 from __future__ import annotations
 
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_user_logic import same_value
+
 
 class SambaOuError(Exception):
     """User-facing error the module turns into ``fail_json``."""
@@ -43,20 +45,22 @@ def plan(state, current, desired):
 
     if current is None:
         attr_changes = {}
-        if "description" in desired:
+        # Removing the description (empty string) is a no-op on a new OU.
+        if desired.get("description"):
             attr_changes["description"] = desired["description"]
         return {"action": "create", "attr_changes": attr_changes, "changed": True}
 
     attr_changes = {}
-    if "description" in desired and current.get("description") != desired["description"]:
-        attr_changes["description"] = desired["description"]
+    if "description" in desired and not same_value(current.get("description"), desired["description"]):
+        # ``None`` means "remove the attribute" (the caller's empty string).
+        attr_changes["description"] = desired["description"] or None
     changed = bool(attr_changes)
     return {"action": "modify" if changed else "none", "attr_changes": attr_changes, "changed": changed}
 
 
 def _effective_description(current, desired, planned):
     """Return the description as it will look after the planned change."""
-    description = current.get("description") if current is not None else desired.get("description")
+    description = current.get("description") if current is not None else (desired.get("description") or None)
     if "description" in planned["attr_changes"]:
         description = planned["attr_changes"]["description"]
     return description
@@ -130,7 +134,7 @@ def run(params, check_mode, io):
         return result
 
     if planned["action"] == "create":
-        io.create_ou(name, path, desired.get("description"))
+        io.create_ou(name, path, desired.get("description") or None)
         current = io.read_current(name, path)
 
     if current is None:

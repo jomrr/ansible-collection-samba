@@ -57,6 +57,8 @@ class FakeLdb:
     SCOPE_BASE = 0
     SCOPE_ONELEVEL = 1
     FLAG_MOD_REPLACE = 2
+    FLAG_MOD_DELETE = 3
+    ERR_NO_SUCH_ATTRIBUTE = 16
     ERR_NO_SUCH_OBJECT = 32
     ERR_ENTRY_ALREADY_EXISTS = 68
     ERR_NOT_ALLOWED_ON_NON_LEAF = 66
@@ -84,6 +86,7 @@ class FakeSamDB:
         self.delete_error = delete_error
         self.created = []
         self.deleted = []
+        self.modified = []
 
     def search(self, base, scope, attrs):
         if self.search_error is not None:
@@ -98,6 +101,7 @@ class FakeSamDB:
     def modify(self, message):
         if self.modify_error is not None:
             raise self.modify_error
+        self.modified.append(message)
 
     def delete(self, dn):
         if self.delete_error is not None:
@@ -153,6 +157,23 @@ def test_create_missing_parent_raises_clean():
 def test_set_description_vanished_raises_clean():
     samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
     with pytest.raises(logic.SambaOuError):
+        make_io(samdb).set_description("OU=Staff,DC=example,DC=com", "new")
+
+
+def test_set_description_none_removes_the_attribute():
+    samdb = FakeSamDB()
+    make_io(samdb).set_description("OU=Staff,DC=example,DC=com", None)
+    assert samdb.modified[0].elements["description"] == ([], FakeLdb.FLAG_MOD_DELETE, "description")
+
+
+def test_set_description_remove_of_absent_attribute_is_noop():
+    samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_ATTRIBUTE, "no such attribute"))
+    make_io(samdb).set_description("OU=Staff,DC=example,DC=com", None)
+
+
+def test_set_description_replace_does_not_swallow_no_such_attribute():
+    samdb = FakeSamDB(modify_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_ATTRIBUTE, "odd"))
+    with pytest.raises(FakeLdbError):
         make_io(samdb).set_description("OU=Staff,DC=example,DC=com", "new")
 
 

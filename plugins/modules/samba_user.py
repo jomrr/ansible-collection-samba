@@ -20,6 +20,9 @@ description:
   - The module is idempotent and supports check mode. Only attributes that are
     explicitly set are compared and changed; unset attributes are left
     untouched, including the enabled state (see I(enabled)).
+  - An empty string removes an attribute from the account, for example
+    C(description="") . The POSIX integer attributes I(uid_number) and
+    I(gid_number) cannot be removed this way.
   - Only user accounts (LDAP C(objectCategory=person)) are managed; computer
     accounts are never matched, even by an exact C(sAMAccountName).
 author:
@@ -337,19 +340,41 @@ class SambaUserIO:
             raise
 
     def apply_attrs(self, dn, attr_changes):
-        """Replace the given scalar attributes on the user object.
+        """Replace or remove the given scalar attributes on the user object.
 
         Values are written as text (LDB stores the integer POSIX attributes as
-        decimal strings too). Fails cleanly if the object was removed (concurrent
+        decimal strings too); ``None`` removes the attribute (the caller's
+        empty string). Fails cleanly if the object was removed (concurrent
         delete) before the modify reached the DC.
         """
         ldb = self._ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
+        replaced = False
+        clears = []
         for name, value in attr_changes.items():
             ldap_attr = logic.ATTR_TO_LDAP[name]
+            if value is None:
+                clears.append(ldap_attr)
+                continue
             message[ldap_attr] = ldb.MessageElement(str(value), ldb.FLAG_MOD_REPLACE, ldap_attr)
-        self._modify(message, dn)
+            replaced = True
+        if replaced:
+            self._modify(message, dn)
+        for ldap_attr in clears:
+            self._clear_attr(dn, ldap_attr)
+
+    def _clear_attr(self, dn, ldap_attr):
+        """Remove an attribute; one that is already gone is an idempotent no-op."""
+        ldb = self._ldb()
+        message = ldb.Message()
+        message.dn = ldb.Dn(self.samdb, dn)
+        message[ldap_attr] = ldb.MessageElement([], ldb.FLAG_MOD_DELETE, ldap_attr)
+        try:
+            self._modify(message, dn)
+        except ldb.LdbError as err:
+            if err.args[0] != ldb.ERR_NO_SUCH_ATTRIBUTE:
+                raise
 
     def rfc2307_provisioned(self):
         """True if the domain was provisioned with C(--use-rfc2307)."""
@@ -400,23 +425,28 @@ class SambaUserIO:
                 return False
             raise
 
-    def set_password(self, username, password):
+    def set_password(self, dn, password):
         """Set the password of an existing user.
 
-        Uses samba's ``setpassword`` - the same mechanism as
-        C(samba-tool user setpassword) - so password policy and encoding are
-        handled by samba. The username is escaped before it enters the search
-        filter. Fails cleanly if the object was removed (concurrent delete)
-        before the write reached the DC.
+        Writes ``unicodePwd`` the way samba's ``setpassword`` does (the quoted
+        UTF-16 form; the DC enforces the password policy), but by DN: a user
+        removed concurrently surfaces as ERR_NO_SUCH_OBJECT and a policy
+        rejection as ERR_CONSTRAINT_VIOLATION, both reported cleanly instead
+        of as tracebacks (``setpassword`` itself raises a plain Exception for
+        a missing user). The password never appears in a message.
         """
         ldb = self._ldb()
-        search_filter = "(&(objectCategory=person)(sAMAccountName=%s))" % ldb.binary_encode(username)
+        message = ldb.Message()
+        message.dn = ldb.Dn(self.samdb, dn)
+        message["unicodePwd"] = ldb.MessageElement(
+            ('"%s"' % password).encode("utf-16-le"), ldb.FLAG_MOD_REPLACE, "unicodePwd"
+        )
         try:
-            self.samdb.setpassword(search_filter, password)
+            self._modify(message, dn)
         except ldb.LdbError as err:
-            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
+            if err.args[0] == ldb.ERR_CONSTRAINT_VIOLATION:
                 raise logic.SambaUserError(
-                    "user '%s' vanished before its password could be set" % username
+                    "the domain password policy rejected the new password for '%s'" % dn
                 )
             raise
 

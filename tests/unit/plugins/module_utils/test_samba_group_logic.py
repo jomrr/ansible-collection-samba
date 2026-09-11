@@ -199,3 +199,21 @@ def test_diff_members_order_and_case_independent():
     )
     assert diff["adds"] == []
     assert diff["removes"] == []
+
+
+# --- removing the description (empty string) ---
+
+def test_plan_empty_string_removes_description():
+    planned = logic.plan("present", make_current(description="old"), logic.build_desired(make_params(description="")))
+    assert planned["attr_changes"] == {"description": None}
+    assert planned["changed"] is True
+
+
+def test_plan_empty_string_on_absent_description_is_idempotent():
+    planned = logic.plan("present", make_current(description=None), logic.build_desired(make_params(description="")))
+    assert planned["changed"] is False
+
+
+def test_plan_create_skips_empty_description():
+    planned = logic.plan("present", None, logic.build_desired(make_params(description="")))
+    assert "description" not in planned["attr_changes"]
