@@ -37,6 +37,16 @@ class FakeIO:
         self.existing.append(spec)
         return True
 
+    def update(self, zone, name, spec):
+        self.calls.append(("update", spec["type"], spec["value"], spec["ttl"]))
+        for entry in self.existing or []:
+            if logic.records_equal(spec, entry):
+                if entry["ttl"] == spec["ttl"]:
+                    return False
+                entry["ttl"] = spec["ttl"]
+                return True
+        return self.add(zone, name, spec)
+
     def remove(self, zone, name, spec):
         self.calls.append(("remove", spec["type"], spec["value"]))
         if not self.existing:
@@ -251,3 +261,55 @@ def test_public_state_includes_structure_for_srv():
     spec = logic.validate(make_params(type="SRV", value="dc.example.com", priority=0, weight=100, port=389))
     state = logic.public_state(spec, "example.com", "_ldap._tcp", True)
     assert state["priority"] == 0 and state["weight"] == 100 and state["port"] == 389
+    assert state["ttl"] == 900
+
+
+# --- TTL reconciliation ---
+
+def test_present_ttl_differs_updates_in_place():
+    fake = FakeIO(existing=[{"type": "A", "value": "192.0.2.10", "ttl": 900}])
+    result = logic.run(make_params(ttl=600), False, fake)
+    assert result["changed"] is True
+    # The matching record is updated, not added a second time.
+    assert call_names(fake) == ["update"]
+    assert fake.existing == [{"type": "A", "value": "192.0.2.10", "ttl": 600}]
+    assert result["record"]["ttl"] == 600
+    assert result["diff"]["before"]["ttl"] == 900
+    assert result["diff"]["after"]["ttl"] == 600
+
+
+def test_present_same_ttl_is_idempotent():
+    fake = FakeIO(existing=[{"type": "A", "value": "192.0.2.10", "ttl": 600}])
+    result = logic.run(make_params(ttl=600), False, fake)
+    assert result["changed"] is False
+    assert call_names(fake) == []
+
+
+def test_ttl_only_diff_keeps_the_stored_value_on_both_sides():
+    # CNAME stored with a trailing dot, requested without: same identity, so
+    # the diff must show only the TTL moving, not a spurious value change.
+    fake = FakeIO(existing=[{"type": "CNAME", "value": "www.example.com.", "ttl": 900}])
+    result = logic.run(make_params(type="CNAME", value="www.example.com", ttl=300), False, fake)
+    assert result["changed"] is True
+    assert result["diff"]["before"]["value"] == result["diff"]["after"]["value"] == "www.example.com."
+    assert (result["diff"]["before"]["ttl"], result["diff"]["after"]["ttl"]) == (900, 300)
+
+
+def test_check_mode_ttl_change_does_not_write():
+    fake = FakeIO(existing=[{"type": "A", "value": "192.0.2.10", "ttl": 900}])
+    result = logic.run(make_params(ttl=600), True, fake)
+    assert result["changed"] is True
+    assert call_names(fake) == []
+
+
+def test_ttl_update_race_reports_unchanged():
+    class ConcurrentIO(FakeIO):
+        def update(self, zone, name, spec):
+            self.calls.append(("update", spec["type"], spec["value"], spec["ttl"]))
+            return False
+
+    fake = ConcurrentIO(existing=[{"type": "A", "value": "192.0.2.10", "ttl": 900}])
+    result = logic.run(make_params(ttl=600), False, fake)
+    assert "update" in call_names(fake)
+    assert result["changed"] is False
+    assert result["record"]["state"] == "present"

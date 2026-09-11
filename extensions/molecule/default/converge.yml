@@ -303,6 +303,23 @@
         value: "ns1.{{ samba_dns_zone }}"
         state: present
 
+    - name: Converge | Change only the TTL of a seeded record (reconciled in place)
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: dnsttl
+        type: A
+        value: 192.0.2.96
+        ttl: 600
+        state: present
+
+    - name: Converge | Re-create a name samba-tool deleted (node tombstoned by the RPC)
+      jomrr.samba.samba_dns_record:
+        zone: "{{ samba_dns_zone }}"
+        name: dnsrevive
+        type: A
+        value: 192.0.2.97
+        state: present
+
     - name: Converge | Remove a seeded DNS record
       jomrr.samba.samba_dns_record:
         zone: "{{ samba_dns_zone }}"

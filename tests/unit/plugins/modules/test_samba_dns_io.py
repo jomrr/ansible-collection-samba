@@ -74,22 +74,23 @@ ROUND_TRIP = [
 
 @pytest.mark.parametrize("spec", ROUND_TRIP, ids=[s["type"] for s in ROUND_TRIP])
 def test_build_then_extract_round_trips(spec):
-    rec = samba_dns_io.build_record(spec)
+    rec = samba_dns_io.build_record(spec, 7)
     assert rec.wType == getattr(FakeDnsp, "DNS_TYPE_" + spec["type"])
     assert rec.rank == FakeDnsp.DNS_RANK_ZONE
     assert rec.dwTtlSeconds == spec["ttl"]
+    assert rec.dwSerial == 7
     assert samba_dns_io.record_to_spec(rec) == spec
 
 
 def test_mx_fields_mapped():
-    rec = samba_dns_io.build_record({"type": "MX", "value": "mail.example.com", "preference": 20, "ttl": 900})
+    rec = samba_dns_io.build_record({"type": "MX", "value": "mail.example.com", "preference": 20, "ttl": 900}, 1)
     assert rec.data.nameTarget == "mail.example.com"
     assert rec.data.wPriority == 20
 
 
 def test_srv_fields_mapped():
     rec = samba_dns_io.build_record(
-        {"type": "SRV", "value": "dc.example.com", "priority": 1, "weight": 50, "port": 88, "ttl": 900})
+        {"type": "SRV", "value": "dc.example.com", "priority": 1, "weight": 50, "port": 88, "ttl": 900}, 1)
     assert rec.data.nameTarget == "dc.example.com"
     assert (rec.data.wPriority, rec.data.wWeight, rec.data.wPort) == (1, 50, 88)
 

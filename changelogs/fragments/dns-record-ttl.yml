@@ -1,0 +1,8 @@
+---
+bugfixes:
+  - >-
+    samba_dns_record - C(ttl) is now reconciled. A record with the same identity
+    but a different TTL was reported unchanged and the requested TTL never
+    applied; it is now updated in place (old value deleted and new one added in
+    one modify) and reported as a change, with the TTL shown in the diff and in
+    the returned record.

@@ -336,6 +336,62 @@
         that:
           - _dns_resolved.stdout is match('192\.0\.2\.98\s')
 
+    - name: Verify | Read the record whose TTL was changed
+      jomrr.samba.samba_dns_record_info:
+        zone: "{{ samba_dns_zone }}"
+        name: dnsttl
+        type: A
+      register: _dns_ttl
+
+    - name: Verify | The TTL was reconciled in place (one record, new TTL)
+      ansible.builtin.assert:
+        that:
+          - _dns_ttl.records | map(attribute='value') | list == ["192.0.2.96"]
+          - _dns_ttl.records[0].ttl == 600
+
+    - name: Verify | Resolve the name samba-tool had deleted (revived tombstoned node)
+      ansible.builtin.command:
+        argv:
+          - getent
+          - ahostsv4
+          - "dnsrevive.{{ samba_dns_zone }}"
+      register: _dns_revived
+      changed_when: false
+
+    - name: Verify | The revived name resolves
+      ansible.builtin.assert:
+        that:
+          - _dns_revived.stdout is match('192\.0\.2\.97\s')
+
+    - name: Verify | Read the SOA serial baseline recorded after seeding
+      ansible.builtin.command:
+        argv:
+          - cat
+          - /var/lib/samba/soa-serial-baseline
+      register: _soa_baseline
+      changed_when: false
+
+    - name: Verify | Query the current SOA serial through the DNS RPC
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - dns
+          - query
+          - "{{ samba_fqdn }}"
+          - "{{ samba_dns_zone }}"
+          - "@"
+          - SOA
+          - "--username=Administrator"
+      environment:
+        PASSWD: "{{ samba_admin_password }}"
+      register: _soa_now
+      changed_when: false
+
+    - name: Verify | The record changes raised the zone serial (secondaries would refresh)
+      ansible.builtin.assert:
+        that:
+          - (_soa_now.stdout | regex_search('serial=([0-9]+)', '\\1') | first | int) > (_soa_baseline.stdout | trim | int)
+
     # Zones are read back through samba_dns_zone_info (the LDB read mirror of
     # samba_dns_zone), the same pattern as the other modules - replacing the
     # earlier samba-tool dns zonelist probe.

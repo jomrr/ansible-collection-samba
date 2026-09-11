@@ -365,6 +365,63 @@
             value: 192.0.2.99
             state: present
 
+        - name: Prepare | seed | DNS A record whose TTL converge will change
+          jomrr.samba.samba_dns_record:
+            zone: "{{ samba_dns_zone }}"
+            name: dnsttl
+            type: A
+            value: 192.0.2.96
+            ttl: 900
+            state: present
+
+        - name: Prepare | seed | DNS A record samba-tool will delete (RPC tombstone)
+          jomrr.samba.samba_dns_record:
+            zone: "{{ samba_dns_zone }}"
+            name: dnsrevive
+            type: A
+            value: 192.0.2.97
+            state: present
+
+        - name: Prepare | seed | tombstone that name the way samba-tool does
+          # samba-tool dns delete goes through the dnsserver RPC, which leaves a
+          # tombstoned node (dNSTombstoned=TRUE); converge re-creates the name.
+          ansible.builtin.command:
+            argv:
+              - samba-tool
+              - dns
+              - delete
+              - "{{ samba_fqdn }}"
+              - "{{ samba_dns_zone }}"
+              - dnsrevive
+              - A
+              - 192.0.2.97
+              - "--username=Administrator"
+          environment:
+            PASSWD: "{{ samba_admin_password }}"
+          changed_when: true
+
+        - name: Prepare | seed | read the SOA serial after seeding
+          ansible.builtin.command:
+            argv:
+              - samba-tool
+              - dns
+              - query
+              - "{{ samba_fqdn }}"
+              - "{{ samba_dns_zone }}"
+              - "@"
+              - SOA
+              - "--username=Administrator"
+          environment:
+            PASSWD: "{{ samba_admin_password }}"
+          register: _soa_seeded
+          changed_when: false
+
+        - name: Prepare | seed | store the SOA serial baseline (verify expects converge to raise it)
+          ansible.builtin.copy:
+            content: "{{ _soa_seeded.stdout | regex_search('serial=([0-9]+)', '\\1') | first }}"
+            dest: /var/lib/samba/soa-serial-baseline
+            mode: "0644"
+
         - name: Prepare | seed | DNS zone converge will remove
           jomrr.samba.samba_dns_zone:
             name: zdelete.example.com

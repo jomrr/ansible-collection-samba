@@ -1,0 +1,10 @@
+---
+bugfixes:
+  - >-
+    samba_dns_record - every record change now raises the zone's SOA serial
+    (and stamps the record with it), as C(samba-tool dns) does. Before, the
+    serial never moved and records carried a fixed serial of 1, so secondaries
+    (zone transfers) and BIND9_DLZ notifications never saw the changes. The
+    serial is swapped by deleting the exact old SOA value and adding the new
+    one in a single modify, so a concurrently rewritten SOA is re-read instead
+    of overwritten; idempotent runs do not touch it.

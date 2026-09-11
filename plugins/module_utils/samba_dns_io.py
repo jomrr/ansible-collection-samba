@@ -16,7 +16,9 @@ logic layer and the ``dnsp`` records stored in the directory.
 from __future__ import annotations
 
 import importlib
+import time
 
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
 
 #: Record types this module builds/extracts (the eight managed types).
@@ -30,6 +32,12 @@ _TXT_SEP = "\x00"
 #: (``dNSTombstoned=TRUE``) and never answers it, so every read here treats such
 #: a node as absent.
 LIVE_NODE_FILTER = "(&(objectClass=dnsNode)(!(dNSTombstoned=TRUE)))"
+#: Attempts for a compare-and-swap write (delete the exact old value and add
+#: the new one in a single modify): when the old bytes are gone the DC answers
+#: ERR_NO_SUCH_ATTRIBUTE, the writer re-reads and tries again.
+CAS_RETRIES = 3
+#: Seconds between the NT epoch (1601) and the Unix epoch (1970).
+_NT_EPOCH_OFFSET = 11644473600
 
 
 def load_dnsp():
@@ -55,18 +63,18 @@ def _type_name(dnsp, wtype):
     return None
 
 
-def build_record(spec):
+def build_record(spec, serial):
     """Build an on-disk ``dnsp.DnssrvRpcRecord`` from a record spec.
 
-    Serial/ttl do not affect identity (the matcher ignores them); a fixed serial
-    and the requested ttl are used, with the standard zone rank for a static
-    record.
+    ``serial`` is the zone serial the change belongs to (see
+    :func:`bump_soa_serial`). Neither it nor the ttl affect identity (the
+    matcher ignores both); the standard zone rank marks a static record.
     """
     dnsp = load_dnsp()
     rec = dnsp.DnssrvRpcRecord()
     rec.wType = _type_const(dnsp, spec["type"])
     rec.rank = dnsp.DNS_RANK_ZONE
-    rec.dwSerial = 1
+    rec.dwSerial = serial
     rec.dwTtlSeconds = spec["ttl"]
     rtype = spec["type"]
     if rtype in _NAME_DATA_TYPES:
@@ -115,6 +123,59 @@ def record_to_spec(rec):
     elif name == "TXT":
         spec["value"] = _TXT_SEP.join(str(s) for s in rec.data.str)
     return spec
+
+
+def tombstone_record(serial):
+    """Build the tombstone record samba leaves on a node whose last record went.
+
+    ``EntombedTime`` is now as NTTIME; samba's garbage collection deletes the
+    node once that is older than the tombstone lifetime.
+    """
+    dnsp = load_dnsp()
+    rec = dnsp.DnssrvRpcRecord()
+    rec.wType = dnsp.DNS_TYPE_TOMBSTONE
+    rec.dwSerial = serial
+    rec.data = (int(time.time()) + _NT_EPOCH_OFFSET) * 10000000
+    return rec
+
+
+def bump_soa_serial(samdb, zone_dn):
+    """Raise the zone's SOA serial by one and return the new value.
+
+    Mirrors what samba's dnsserver RPC does before every record change
+    (``dnsserver_update_soa``): secondaries (AXFR) and BIND9_DLZ notifications
+    only pick a change up once the serial moves. The SOA lives on the apex node
+    ``DC=@``. Its value is swapped by deleting the exact old bytes and adding
+    the new ones in one modify, so an SOA rewritten concurrently fails with
+    ERR_NO_SUCH_ATTRIBUTE and is re-read instead of overwritten.
+    """
+    ldb = samba_user_io.load_ldb()
+    ndr = load_ndr()
+    dnsp = load_dnsp()
+    apex_dn = samba_user_io.build_child_dn(samdb, "DC", "@", zone_dn)
+    attempt = 0
+    while True:
+        res = samdb.search(base=apex_dn, scope=ldb.SCOPE_BASE, attrs=["dnsRecord"])
+        soa_raw = None
+        for value in res[0].get("dnsRecord") or []:
+            rec = ndr.ndr_unpack(dnsp.DnssrvRpcRecord, value)
+            if rec.wType == dnsp.DNS_TYPE_SOA:
+                soa_raw, soa = value, rec
+                break
+        if soa_raw is None:
+            raise logic.SambaDnsRecordError("the zone has no SOA record at its apex")
+        soa.data.serial = (soa.data.serial + 1) & 0xFFFFFFFF
+        soa.dwSerial = soa.data.serial
+        message = ldb.Message(apex_dn)
+        message.add(ldb.MessageElement([soa_raw], ldb.FLAG_MOD_DELETE, "dnsRecord"))
+        message.add(ldb.MessageElement([ndr.ndr_pack(soa)], ldb.FLAG_MOD_ADD, "dnsRecord"))
+        try:
+            samdb.modify(message)
+            return soa.data.serial
+        except ldb.LdbError as err:
+            attempt += 1
+            if err.args[0] != ldb.ERR_NO_SUCH_ATTRIBUTE or attempt >= CAS_RETRIES:
+                raise
 
 
 def find_zone_dn(samdb, zone):
