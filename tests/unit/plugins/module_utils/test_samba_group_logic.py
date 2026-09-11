@@ -13,8 +13,8 @@ from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_log
 def make_params(**over):
     params = {
         "name": "engineers",
-        "scope": "global",
-        "category": "security",
+        "scope": None,
+        "category": None,
         "description": None,
         "members": None,
         "members_purge": False,
@@ -113,6 +113,48 @@ def test_plan_group_type_signed_current_is_idempotent():
     desired = logic.build_desired(make_params(scope="global", category="security"))
     planned = logic.plan("present", make_current(group_type=-2147483646), desired)
     assert planned["changed"] is False
+
+
+# --- scope/category without defaults ---
+
+def test_build_desired_carries_only_the_type_parts_given():
+    assert "scope" not in logic.build_desired(make_params())
+    assert logic.build_desired(make_params(scope="universal")) == {"scope": "universal"}
+
+
+def test_create_group_type_defaults_to_global_security():
+    assert logic.create_group_type(logic.build_desired(make_params())) == logic.group_type("global", "security")
+
+
+def test_create_group_type_fills_the_missing_part_with_the_default():
+    desired = logic.build_desired(make_params(scope="universal"))
+    assert logic.create_group_type(desired) == logic.group_type("universal", "security")
+
+
+def test_plan_unset_type_leaves_a_domain_local_distribution_group_alone():
+    # The DnsAdmins case: updating the description must not try to convert
+    # the group's type.
+    current = make_current(group_type=logic.group_type("domain_local", "distribution"), description="old")
+    planned = logic.plan("present", current, logic.build_desired(make_params(description="new")))
+    assert planned["attr_changes"] == {"description": "new"}
+
+
+def test_plan_category_only_keeps_the_stored_scope():
+    current = make_current(group_type=logic.group_type("domain_local", "security"))
+    planned = logic.plan("present", current, logic.build_desired(make_params(category="distribution")))
+    assert planned["attr_changes"] == {"group_type": logic.group_type("domain_local", "distribution")}
+
+
+def test_plan_scope_only_keeps_the_stored_category():
+    current = make_current(group_type=logic.group_type("global", "distribution"))
+    planned = logic.plan("present", current, logic.build_desired(make_params(scope="universal")))
+    assert planned["attr_changes"] == {"group_type": logic.group_type("universal", "distribution")}
+
+
+def test_target_group_type_unknown_scope_fails_clean():
+    # A stored type without a recognised scope bit cannot keep its scope.
+    with pytest.raises(logic.SambaGroupError):
+        logic.target_group_type(0x80000000, {"category": "distribution"})
 
 
 # --- RFC2307/POSIX gid_number ---

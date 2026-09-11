@@ -178,6 +178,18 @@
           - "'extrauser' in (_addmembers.groups[0].members | join(' ') | lower)"
           - "'jane' in (_addmembers.groups[0].members | join(' ') | lower)"
 
+    - name: Verify | Read the built-in group whose description was updated
+      jomrr.samba.samba_group_info:
+        name: DnsAdmins
+      register: _dnsadmins
+
+    - name: Verify | The built-in group kept its domain-local security type
+      ansible.builtin.assert:
+        that:
+          - _dnsadmins.groups[0].description == "Managed by molecule"
+          - _dnsadmins.groups[0].scope == "domain_local"
+          - _dnsadmins.groups[0].category == "security"
+
     - name: Verify | Read the scope-changed group
       jomrr.samba.samba_group_info:
         name: scopechange

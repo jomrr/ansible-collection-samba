@@ -90,8 +90,8 @@ class FakeIO:
 def make_params(**over):
     params = {
         "name": "engineers",
-        "scope": "global",
-        "category": "security",
+        "scope": None,
+        "category": None,
         "description": None,
         "members": None,
         "members_purge": False,
@@ -145,6 +145,22 @@ def test_modify_group_type():
     assert result["changed"] is True
     assert result["action"] == "modified"
     assert ("set_group_type", logic.group_type("universal", "security")) in fake.calls
+
+
+def test_description_update_keeps_the_existing_type():
+    # A built-in domain-local group gets a new description; with scope and
+    # category unset its type must not be touched.
+    fake = FakeIO(current=existing_group(group_type=logic.group_type("domain_local", "security"), description="old"))
+    result = logic.run(make_params(description="new"), False, fake)
+    assert result["changed"] is True
+    assert "set_group_type" not in call_names(fake)
+    assert result["group"]["scope"] == "domain_local"
+
+
+def test_create_with_scope_only_uses_the_default_category():
+    fake = FakeIO(current=None)
+    logic.run(make_params(scope="universal"), False, fake)
+    assert ("create_group", "engineers", logic.group_type("universal", "security"), None) in fake.calls
 
 
 def test_modify_description():

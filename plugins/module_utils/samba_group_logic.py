@@ -81,14 +81,47 @@ def _same_group_type(left, right):
     return (int(left) & 0xFFFFFFFF) == (int(right) & 0xFFFFFFFF)
 
 
+#: The type samba-tool gives a new group when none is asked for.
+DEFAULT_SCOPE = "global"
+DEFAULT_CATEGORY = "security"
+
+
 def build_desired(params):
-    """Build the desired-state dict from the module parameters."""
-    desired = {"group_type": group_type(params["scope"], params["category"])}
-    if params.get("description") is not None:
-        desired["description"] = params["description"]
-    if params.get("gid_number") is not None:
-        desired["gid_number"] = params["gid_number"]
+    """Build the desired-state dict from the module parameters.
+
+    Only options the caller actually set are included. ``scope`` and
+    ``category`` are no exception: left unset, an existing group keeps its
+    type and a new one is created as a global security group.
+    """
+    desired = {}
+    for name in ("scope", "category", "description", "gid_number"):
+        if params.get(name) is not None:
+            desired[name] = params[name]
     return desired
+
+
+def create_group_type(desired):
+    """Return the groupType a new group gets; unset parts take samba-tool's default."""
+    return group_type(desired.get("scope") or DEFAULT_SCOPE, desired.get("category") or DEFAULT_CATEGORY)
+
+
+def target_group_type(current_group_type, desired):
+    """Return the groupType an existing group should have, or None to leave it.
+
+    Only the parts given (scope, category) are reconciled; the other part is
+    kept from the stored type, so updating a built-in group's description never
+    tries to convert it. Fails clearly when the stored scope cannot be decoded
+    and would have to be kept.
+    """
+    if "scope" not in desired and "category" not in desired:
+        return None
+    current_scope, current_category = decode_group_type(current_group_type)
+    scope = desired.get("scope") or current_scope
+    if scope is None:
+        raise SambaGroupError(
+            "the stored groupType has no recognised scope; set scope explicitly to change the category"
+        )
+    return group_type(scope, desired.get("category") or current_category)
 
 
 def check_posix_preconditions(desired, io):
@@ -132,8 +165,9 @@ def plan(state, current, desired):
         attr_changes["description"] = desired["description"] or None
     if "gid_number" in desired and current.get("gid_number") != desired["gid_number"]:
         attr_changes["gid_number"] = desired["gid_number"]
-    if not _same_group_type(current["group_type"], desired["group_type"]):
-        attr_changes["group_type"] = desired["group_type"]
+    target = target_group_type(current["group_type"], desired)
+    if target is not None and not _same_group_type(current["group_type"], target):
+        attr_changes["group_type"] = target
     changed = bool(attr_changes)
     return {"action": "modify" if changed else "none", "attr_changes": attr_changes, "changed": changed}
 
@@ -180,7 +214,7 @@ def _effective_state(current, desired, planned, member_diff):
         description = current.get("description")
         gid_number = current.get("gid_number")
     else:
-        group_type_value = desired["group_type"]
+        group_type_value = create_group_type(desired)
         description = desired.get("description") or None
         gid_number = desired.get("gid_number")
     if "group_type" in planned["attr_changes"]:
@@ -298,7 +332,7 @@ def run(params, check_mode, io):
         raise SambaGroupError("path '%s' does not exist; create it first" % path)
 
     if planned["action"] == "create":
-        io.create_group(name, desired["group_type"], desired.get("description") or None)
+        io.create_group(name, create_group_type(desired), desired.get("description") or None)
         current = io.read_current(name)
 
     if current is None:

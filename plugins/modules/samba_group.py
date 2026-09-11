@@ -17,7 +17,11 @@ description:
     Controller, including their type (scope and category) and membership.
   - Talks to the directory through the native C(samba) Python bindings
     (C(samba.samdb.SamDB)), not through C(samba-tool) subprocesses.
-  - The module is idempotent and supports check mode.
+  - The module is idempotent and supports check mode. Only options that are
+    explicitly set are compared and changed; in particular the type of an
+    existing group changes only when I(scope) or I(category) is given, so a
+    task that merely updates the description of a built-in group such as
+    C(DnsAdmins) never tries to convert it.
 author:
   - Jonas Mauer (@jomrr)
 requirements:
@@ -34,8 +38,9 @@ options:
     description:
       - The group scope. Together with I(category) it determines the
         C(groupType) attribute.
+      - If omitted, a new group is created as C(global) and the scope of an
+        existing group is left unchanged.
     type: str
-    default: global
     choices:
       - global
       - domain_local
@@ -44,8 +49,9 @@ options:
     description:
       - The group category. Together with I(scope) it determines the
         C(groupType) attribute.
+      - If omitted, a new group is created as C(security) and the category of
+        an existing group is left unchanged.
     type: str
-    default: security
     choices:
       - security
       - distribution
@@ -133,6 +139,11 @@ EXAMPLES = r"""
   jomrr.samba.samba_group:
     name: engineers
     gid_number: 10000
+
+- name: Update the description of a built-in group (its domain-local type stays untouched)
+  jomrr.samba.samba_group:
+    name: DnsAdmins
+    description: DNS administrators
 
 - name: Remove a group
   jomrr.samba.samba_group:
@@ -395,8 +406,8 @@ def main():
     """Module entry point."""
     argument_spec = dict(
         name=dict(type="str", required=True, aliases=["samaccountname"]),
-        scope=dict(type="str", default="global", choices=["global", "domain_local", "universal"]),
-        category=dict(type="str", default="security", choices=["security", "distribution"]),
+        scope=dict(type="str", choices=["global", "domain_local", "universal"]),
+        category=dict(type="str", choices=["security", "distribution"]),
         description=dict(type="str"),
         gid_number=dict(type="int"),
         members=dict(type="list", elements="str"),

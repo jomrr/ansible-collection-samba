@@ -149,6 +149,14 @@
         category: security
         state: present
 
+    - name: Converge | Update a built-in group's description without touching its type
+      # DnsAdmins is domain-local. With scope and category unset the type must
+      # stay; the old defaults would have tried to convert it to global.
+      jomrr.samba.samba_group:
+        name: DnsAdmins
+        description: Managed by molecule
+        state: present
+
     - name: Converge | Set the POSIX gid on an existing group
       jomrr.samba.samba_group:
         name: posixgrp
