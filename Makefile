@@ -62,7 +62,7 @@ docs-clean: ## Remove the generated docsite output (docs/rst, docs/build)
 # if dev and main have diverged, so a divergence is surfaced, not hidden. Merges
 # origin/dev (the pushed dev state) after the fetch, not a stale local dev.
 # Kept separate from `release`: after `make promote` the main CI runs (incl.
-# molecule); once it is green, check out main and run `make release` separately.
+# molecule); once it is green, run `make release` (it switches to main itself).
 promote: ## Merge dev into main, push, and return to dev
 	git fetch origin
 	git checkout main
@@ -70,22 +70,28 @@ promote: ## Merge dev into main, push, and return to dev
 	git push origin main
 	git checkout dev
 
-# Requires GH_TOKEN in the environment and being on the main branch (PSR only
-# releases from the main/master group). PSR bumps galaxy.yml, builds, tags and
-# creates the GitHub release; CHANGELOG.rst stays antsibull-changelog's.
-# The release commit lands on main only, so dev is fast-forwarded to main
-# afterwards; otherwise the next `make promote` cannot fast-forward. Right
-# after a promote dev has no commits of its own, so --ff-only succeeds; if
-# work continued on dev meanwhile it fails and the divergence is surfaced,
-# as in promote (the release itself is complete at that point).
-release: ## Cut a release on main, then fast-forward dev to it (needs GH_TOKEN)
+# Requires GH_TOKEN in the environment. PSR only releases from the main/master
+# group, so the target checks out main itself (promote leaves the tree on dev).
+# PSR bumps galaxy.yml, builds, tags and creates the GitHub release;
+# CHANGELOG.rst stays antsibull-changelog's. The release commit lands on main
+# only, so dev is fast-forwarded to main afterwards; otherwise the next
+# `make promote` cannot fast-forward. Right after a promote dev has no commits
+# of its own, so --ff-only succeeds; if work continued on dev meanwhile it
+# fails and the divergence is surfaced, as in promote (the release itself is
+# complete at that point).
+release: ## Cut a release from main, then fast-forward dev to it (needs GH_TOKEN)
+	git checkout main
 	semantic-release version --no-changelog && semantic-release publish
 	git checkout dev
 	git merge --ff-only main
 	git push origin dev
 
-release-dry: ## Compute the next version without committing, tagging or releasing
+# Same branch rule as release: the next version is computed from main, i.e.
+# from what promote has pushed, not from unpromoted dev commits.
+release-dry: ## Compute the next version from main, without committing, tagging or releasing
+	git checkout main
 	semantic-release --noop version --no-changelog
+	git checkout dev
 
 # The version galaxy.yml carries, resolved when the recipe runs (not at parse
 # time), so `make release galaxy` publishes the version release just bumped.
