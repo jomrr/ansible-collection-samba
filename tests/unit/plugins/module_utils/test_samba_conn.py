@@ -183,6 +183,28 @@ def test_realm_derived_from_server_when_omitted(conn_env):
     assert creds.calls["realm"] == "EXAMPLE.COM"
 
 
+@pytest.mark.parametrize("server", ["dc1", "10.0.2.5", "dc1."])
+def test_realm_is_required_for_a_bare_name_or_an_ip(conn_env, server):
+    # No guessed realm (DC1, 0.2.5): a clear validation error before any
+    # connection is attempted.
+    with pytest.raises(AnsibleFailJson) as raised:
+        samba_conn.connect_samdb(FakeModule(_params(server=server, realm=None)))
+    assert "realm is required" in raised.value.args[0]["msg"]
+    assert FakeSamDB.instances == []
+
+
+def test_explicit_realm_makes_a_bare_server_name_fine(conn_env):
+    samba_conn.connect_samdb(FakeModule(_params(server="dc1", realm="EXAMPLE.COM")))
+    assert FakeCredentials.instances[-1].calls["realm"] == "EXAMPLE.COM"
+
+
+def test_realm_from_server_helper():
+    assert samba_conn.realm_from_server("dc1.samdom.example.com") == "SAMDOM.EXAMPLE.COM"
+    assert samba_conn.realm_from_server("dc1") is None
+    assert samba_conn.realm_from_server("192.0.2.10") is None
+    assert samba_conn.realm_from_server("2001:db8::10") is None
+
+
 def _failed_connect(**params):
     with pytest.raises(AnsibleFailJson) as raised:
         samba_conn.connect_samdb(FakeModule(_params(**params)))

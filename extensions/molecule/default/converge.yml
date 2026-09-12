@@ -287,6 +287,14 @@
       register: _badpath
       failed_when: _badpath is not failed or 'not a valid distinguished name' not in _badpath.msg
 
+    - name: Converge | A bare server name without realm is refused before any connection
+      # module_defaults sets realm for the group; an empty value un-sets it here.
+      jomrr.samba.samba_user_info:
+        server: "{{ inventory_hostname }}"
+        realm: ""
+      register: _norealm
+      failed_when: _norealm is not failed or 'realm is required' not in _norealm.msg
+
     - name: Converge | Create a user directly in an OU
       jomrr.samba.samba_user:
         username: placed

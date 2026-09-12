@@ -39,7 +39,9 @@ options:
   realm:
     description:
       - The Kerberos realm, for example C(EXAMPLE.COM).
-      - If omitted it is derived from O(server) (the domain part, uppercased).
+      - If omitted it is derived from O(server) (the domain part, uppercased),
+        which needs a fully qualified host name. For a bare host name or an IP
+        address the realm cannot be derived and this option is required.
     type: str
 notes:
   - Modules authenticate to the DC with explicit caller credentials over LDAP

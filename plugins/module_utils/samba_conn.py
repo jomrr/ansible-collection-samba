@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import ipaddress
 import os
 import traceback
 
@@ -82,15 +83,41 @@ def fail_without_bindings(module) -> None:
         module.fail_json(msg=missing_required_lib("samba"))
 
 
-def _realm_from_server(server):
-    """Derive the Kerberos realm from a server FQDN (its domain part, uppercased)."""
-    parts = server.split(".", 1)
-    return parts[1].upper() if len(parts) == 2 else server.upper()
+def realm_from_server(server):
+    """Return the realm a fully qualified host name implies, or None.
+
+    The domain part of ``server``, uppercased, when ``server`` has one and is
+    not an IP address. A bare host name or an IP literal implies no realm, so
+    ``None`` - guessing one (``DC1``, ``0.2.10``) would only surface later as a
+    cryptic Kerberos error.
+    """
+    dummy_host, dot, domain = server.partition(".")
+    if not dot or not domain:
+        return None
+    try:
+        ipaddress.ip_address(server)
+    except ValueError:
+        return domain.upper()
+    return None
 
 
 def _bind_realm(module):
-    """Return the realm to authenticate against (``realm``, or derived from ``server``)."""
-    return module.params.get("realm") or _realm_from_server(module.params["server"])
+    """Return the realm to authenticate against: ``realm``, or derived from ``server``.
+
+    Fails clearly, before any connection, when ``realm`` is omitted and
+    ``server`` is not a fully qualified host name.
+    """
+    realm = module.params.get("realm")
+    if realm:
+        return realm
+    server = module.params["server"]
+    derived = realm_from_server(server)
+    if derived is None:
+        module.fail_json(
+            msg="realm is required when server is not a fully qualified host name "
+                "(got '%s'); give the Kerberos realm explicitly" % server
+        )
+    return derived
 
 
 def build_credentials(module):
