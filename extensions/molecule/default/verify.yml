@@ -26,6 +26,20 @@
           - _jane.users[0].email == "jane.doe@example.com"
           - _jane.users[0].enabled is true
 
+    - name: Verify | Read the user created with names only
+      jomrr.samba.samba_user_info:
+        username: derived
+      register: _derived
+
+    - name: Verify | The display name was derived from the names on the add (as samba-tool does)
+      ansible.builtin.assert:
+        that:
+          - _derived.users | length == 1
+          - _derived.users[0].dn | lower is search('^cn=derived,')
+          - _derived.users[0].given_name == "Dee"
+          - _derived.users[0].surname == "Rived"
+          - _derived.users[0].display_name == "Dee Rived"
+
     - name: Verify | Read the modified user
       jomrr.samba.samba_user_info:
         username: tomodify
@@ -162,6 +176,18 @@
         that:
           - _posixgrp.groups[0].gid_number == 10000
           - _posixgrp.groups[0].gid_number is integer
+
+    - name: Verify | Read the group created with a POSIX gid directly in an OU
+      jomrr.samba.samba_group_info:
+        name: posixnew
+      register: _posixnew
+
+    - name: Verify | The gid and the placement came with the single add
+      ansible.builtin.assert:
+        that:
+          - _posixnew.groups | length == 1
+          - _posixnew.groups[0].gid_number == 10001
+          - _posixnew.groups[0].dn | lower is search('ou=loc_a')
 
     - name: Verify | Read the purged group
       jomrr.samba.samba_group_info:

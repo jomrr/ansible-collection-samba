@@ -92,9 +92,10 @@ class FakeSamDB:
         self.captured = {"base": base, "scope": scope, "expression": expression, "attrs": attrs}
         return self.search_result
 
-    def newuser(self, username, password):
+    def newuser(self, username, password, **kwargs):
         if self.newuser_error is not None:
             raise self.newuser_error
+        self.newuser_kwargs = kwargs
 
     def modify(self, message):
         if self.modify_error is not None:
@@ -166,14 +167,33 @@ def test_create_user_collision_raises_clean():
     fake_ldb = FakeLdb()
     samdb = FakeSamDB(newuser_error=FakeLdbError(FakeLdb.ERR_ENTRY_ALREADY_EXISTS, "exists"))
     with pytest.raises(logic.SambaUserError):
-        make_io(fake_ldb, samdb).create_user("jdoe", "pw")
+        make_io(fake_ldb, samdb).create_user("jdoe", "pw", None, {})
 
 
 def test_create_user_other_ldberror_propagates():
     fake_ldb = FakeLdb()
     samdb = FakeSamDB(newuser_error=FakeLdbError(999, "boom"))
     with pytest.raises(FakeLdbError):
-        make_io(fake_ldb, samdb).create_user("jdoe", "pw")
+        make_io(fake_ldb, samdb).create_user("jdoe", "pw", None, {})
+
+
+def test_create_user_maps_attributes_onto_newuser():
+    samdb = FakeSamDB()
+    make_io(FakeLdb(), samdb).create_user(
+        "jdoe", "pw", None,
+        {"given_name": "Jane", "surname": "Doe", "email": "jane@example.com", "uid_number": 10001, "gecos": "Jane"},
+    )
+    assert samdb.newuser_kwargs == {
+        "userou": None, "givenname": "Jane", "surname": "Doe", "mailaddress": "jane@example.com",
+        "uidnumber": 10001, "gecos": "Jane",
+    }
+
+
+def test_create_attrs_match_what_the_io_maps():
+    # The logic keeps display_name out of the add because newuser has no such
+    # argument; the two lists must agree.
+    assert set(logic.CREATE_ATTRS) == set(samba_user.SambaUserIO._NEWUSER_KWARGS)
+    assert "display_name" not in logic.CREATE_ATTRS
 
 
 def test_apply_attrs_vanished_raises_clean():

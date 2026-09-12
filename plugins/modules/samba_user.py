@@ -52,6 +52,9 @@ options:
     description:
       - The display name of the user, mapped to the LDAP C(displayName)
         attribute.
+      - If omitted when the user is created, samba derives it from
+        I(given_name) and I(surname), as C(samba-tool user create) does. An
+        existing user's display name only changes when it is set explicitly.
     type: str
   email:
     description:
@@ -154,11 +157,13 @@ notes:
   - Computer accounts are not managed by this module. A I(username) that names
     a computer account matches nothing, so C(state=absent) never deletes a
     computer object.
-  - Creating a user is all-or-nothing. LDAP offers no transactions, so if any
-    step after the initial add fails (placing the account under I(path),
-    writing attributes or the enabled state), the module removes the account
-    it just created and fails with the cause; a failed create never leaves a
-    half-configured account behind. A password rejected by the domain policy
+  - Creating a user is all-or-nothing. The account is added in a single
+    operation, placed under I(path) with its names, e-mail, description and
+    POSIX attributes; only an explicit I(display_name) and C(enabled=false)
+    are follow-up writes. LDAP offers no transactions, so if such a follow-up
+    fails, the module removes the account it just created and fails with the
+    cause; a failed create never leaves a half-configured account behind. A
+    password rejected by the domain policy
     is cleaned up by samba's own create helper (it deletes the account it just
     added) and reported cleanly, so no account remains either. Changes to an
     existing user are separate LDAP operations; if one fails, the earlier ones
@@ -332,15 +337,33 @@ class SambaUserIO(samba_ldb.SambaObjectIO):
             return None
         return samba_user_io.message_to_state(res[0])
 
-    def create_user(self, username, password):
-        """Create the base user object.
+    #: Module attributes samba's ``newuser`` sets on the add, mapped to its
+    #: keyword arguments (the logic's ``CREATE_ATTRS``).
+    _NEWUSER_KWARGS = {
+        "given_name": "givenname",
+        "surname": "surname",
+        "email": "mailaddress",
+        "description": "description",
+        "uid_number": "uidnumber",
+        "gid_number": "gidnumber",
+        "unix_home_directory": "unixhome",
+        "login_shell": "loginshell",
+        "gecos": "gecos",
+    }
 
-        A concurrent creation (the object already exists at write time) is
-        turned into a clear error instead of a raw traceback.
+    def create_user(self, username, password, path, attrs):
+        """Create the user with one ``newuser`` call.
+
+        The account is placed under ``path`` and gets the names, mail,
+        description and POSIX attributes on the add itself; samba sets the
+        password inside its own cleanup guard. Nothing is renamed or modified
+        afterwards for these. A concurrent creation (the object already exists
+        at write time) is turned into a clear error instead of a raw traceback.
         """
         ldb = samba_ldb.load_ldb()
+        kwargs = {self._NEWUSER_KWARGS[name]: value for name, value in attrs.items()}
         try:
-            self.samdb.newuser(username, password)
+            self.samdb.newuser(username, password, userou=self.container_below_domain(path), **kwargs)
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
                 raise logic.SambaUserError(

@@ -31,8 +31,10 @@ class FakeIO:
         self.calls.append(("rfc2307_provisioned",))
         return self.provisioned
 
-    def create_user(self, username, password):
-        self.calls.append(("create_user", username, password))
+    def create_user(self, username, password, path, attrs):
+        self.calls.append(("create_user", username, password, path, dict(attrs)))
+        # Like newuser: placed under path, the given attributes set on the add,
+        # displayName derived from the names.
         self.current = {
             "given_name": None,
             "surname": None,
@@ -40,9 +42,12 @@ class FakeIO:
             "email": None,
             "description": None,
             "enabled": True,
-            "_dn": "CN=%s,CN=Users,DC=example,DC=com" % username,
+            "_dn": "CN=%s,%s" % (username, path or "CN=Users,DC=example,DC=com"),
             "_uac": 512,
         }
+        self.current.update(attrs)
+        names = [attrs.get("given_name"), attrs.get("surname")]
+        self.current["display_name"] = " ".join(part for part in names if part) or None
 
     def apply_attrs(self, dn, attr_changes):
         self.calls.append(("apply_attrs", dn, dict(attr_changes)))
@@ -117,14 +122,36 @@ def test_module_imports_without_samba():
     assert hasattr(samba_user, "SambaUserIO")
 
 
-def test_create_present_writes():
+def test_create_present_writes_in_one_step():
     fake = FakeIO(current=None)
     result = logic.run(make_params(given_name="Jane", password="S3cret!"), False, fake)
     assert result["changed"] is True
     assert result["action"] == "created"
-    assert "create_user" in call_names(fake)
-    assert "apply_attrs" in call_names(fake)
+    # The names go into the add itself; no modify follows.
+    assert ("create_user", "jdoe", "S3cret!", None, {"given_name": "Jane"}) in fake.calls
+    assert "apply_attrs" not in call_names(fake)
     assert result["user"]["given_name"] == "Jane"
+
+
+def test_create_with_explicit_display_name_writes_it_after_the_add():
+    fake = FakeIO(current=None)
+    logic.run(make_params(given_name="Jane", surname="Doe", display_name="J. Doe", password="S3cret!"), False, fake)
+    names = call_names(fake)
+    assert names.index("create_user") < names.index("apply_attrs")
+    assert ("apply_attrs", "CN=jdoe,CN=Users,DC=example,DC=com", {"display_name": "J. Doe"}) in fake.calls
+    assert fake.current["display_name"] == "J. Doe"
+
+
+def test_create_predicts_the_display_name_samba_derives():
+    # newuser derives displayName from the names; check mode and the diff say so.
+    fake = FakeIO(current=None)
+    result = logic.run(make_params(given_name="Jane", surname="Doe", password="S3cret!"), True, fake)
+    assert result["user"]["display_name"] == "Jane Doe"
+    assert result["diff"]["after"]["display_name"] == "Jane Doe"
+    fake = FakeIO(current=None)
+    result = logic.run(make_params(given_name="Jane", surname="Doe", password="S3cret!"), False, fake)
+    assert "apply_attrs" not in call_names(fake)
+    assert result["user"]["display_name"] == "Jane Doe"
 
 
 def test_create_requires_password():
@@ -334,9 +361,11 @@ def test_posix_attrs_create_writes():
         False, fake,
     )
     assert result["changed"] is True
-    applied = [call[2] for call in fake.calls if call[0] == "apply_attrs"][0]
-    assert applied["uid_number"] == 10001
-    assert applied["login_shell"] == "/bin/bash"
+    # The POSIX attributes go onto the add itself (newuser takes them).
+    created = [call[4] for call in fake.calls if call[0] == "create_user"][0]
+    assert created["uid_number"] == 10001
+    assert created["login_shell"] == "/bin/bash"
+    assert "apply_attrs" not in call_names(fake)
     assert result["user"]["uid_number"] == 10001
 
 
@@ -403,13 +432,21 @@ def test_move_when_location_differs():
     assert ("move", "CN=jdoe,CN=Users,DC=example,DC=com", "OU=Eng,DC=example,DC=com") in fake.calls
 
 
-def test_create_with_path_moves_after_create():
-    fake = _MovingIO(current=None)
+def test_create_with_path_places_the_account_directly():
+    fake = FakeIO(current=None)
     result = logic.run(make_params(password="S3cret!", path="OU=Eng,DC=example,DC=com"), False, fake)
     assert result["changed"] is True
+    assert ("create_user", "jdoe", "S3cret!", "OU=Eng,DC=example,DC=com", {}) in fake.calls
+    assert "move" not in call_names(fake)
+    assert result["user"]["dn"] == "CN=jdoe,OU=Eng,DC=example,DC=com"
+
+
+def test_create_moves_afterwards_only_when_the_add_could_not_place_it():
+    # The domain root cannot be expressed as newuser's relative container; the
+    # account then lands in the default container and is moved.
+    fake = _MovingIO(current=None)
+    logic.run(make_params(password="S3cret!", path="DC=example,DC=com"), False, fake)
     names = call_names(fake)
-    assert "create_user" in names
-    assert "move" in names
     assert names.index("create_user") < names.index("move")
 
 
@@ -499,7 +536,7 @@ class _AttrsFailIO(FakeIO):
 def test_create_failure_after_add_removes_the_new_object():
     fake = _AttrsFailIO(current=None)
     with pytest.raises(logic.SambaUserError) as excinfo:
-        logic.run(make_params(given_name="Jane", password="S3cret!"), False, fake)
+        logic.run(make_params(display_name="Jane D", password="S3cret!"), False, fake)
     names = call_names(fake)
     assert names.index("create_user") < names.index("delete")
     assert fake.current is None
@@ -511,8 +548,8 @@ def test_create_with_rejected_password_removes_half_created_account():
     # samba's newuser adds the object first and sets the password second, so a
     # policy rejection raises after the add and leaves a disabled account.
     class _WeakPasswordIO(FakeIO):
-        def create_user(self, username, password):
-            FakeIO.create_user(self, username, password)
+        def create_user(self, username, password, path, attrs):
+            FakeIO.create_user(self, username, password, path, attrs)
             raise RuntimeError("0000052D: Constraint violation - the password is too short")
 
     fake = _WeakPasswordIO(current=None)
@@ -533,15 +570,15 @@ def test_create_undo_failure_reports_both_errors():
 
     fake = _StuckIO(current=None)
     with pytest.raises(logic.SambaUserError) as excinfo:
-        logic.run(make_params(given_name="Jane", password="S3cret!"), False, fake)
+        logic.run(make_params(display_name="Jane D", password="S3cret!"), False, fake)
     assert "Constraint violation" in str(excinfo.value)
     assert "busy" in str(excinfo.value)
 
 
 def test_create_collision_is_not_undone():
     class _CollisionIO(FakeIO):
-        def create_user(self, username, password):
-            self.calls.append(("create_user", username, password))
+        def create_user(self, username, password, path, attrs):
+            self.calls.append(("create_user", username, password, path, dict(attrs)))
             raise logic.SambaUserError("user 'jdoe' already exists (created concurrently?)")
 
     fake = _CollisionIO(current=None)

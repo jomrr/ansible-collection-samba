@@ -258,8 +258,9 @@ def _undo_create(io, name, exc):
     LDAP offers no transactions (ldb's LDAP backend implements
     transaction_start/commit/cancel as no-ops), so a create is made
     all-or-nothing by compensation: whichever step failed after the initial
-    add (move, gidNumber, membership), the group this run created is deleted
-    again. Only a group that did not exist when the run started reaches this
+    add (membership, or the move a domain-root path needs), the group this run
+    created is deleted again. Only a group that did not exist when the run
+    started reaches this
     point, so nothing foreign is ever removed.
     """
     current = io.read_current(name)
@@ -362,8 +363,13 @@ def run(params, check_mode, io):
 
     created = planned["action"] == "create"
     if created:
+        # One add: newgroup places the group under path and sets its type,
+        # description and gidNumber itself; members are added afterwards.
         try:
-            io.create_group(name, create_group_type(desired), desired.get("description") or None)
+            io.create_group(
+                name, create_group_type(desired), desired.get("description") or None,
+                path, desired.get("gid_number"),
+            )
         except SambaGroupError:
             # A concurrent create: the object is not ours, nothing to undo.
             raise
@@ -373,10 +379,11 @@ def run(params, check_mode, io):
         if current is None:
             raise SambaGroupError("group '%s' could not be read back after creation" % name)
 
-    # Order: move first (so later writes target the final DN), then attributes
-    # and membership. Each is its own LDAP operation; on a fresh group a failure
-    # rolls the create back, on an existing group the earlier steps stay
-    # applied and a re-run completes the rest.
+    # Order: move first (so later writes target the final DN; a fresh group is
+    # already in place unless path is the domain root, which newgroup cannot
+    # express), then attributes and membership. Each is its own LDAP operation;
+    # on a fresh group a failure rolls the create back, on an existing group
+    # the earlier steps stay applied and a re-run completes the rest.
     moved = False
     member_changed = False
     try:
@@ -390,11 +397,8 @@ def run(params, check_mode, io):
                 io.set_description(current["_dn"], planned["attr_changes"]["description"])
             if "group_type" in planned["attr_changes"]:
                 io.set_group_type(current["_dn"], planned["attr_changes"]["group_type"])
-
-        # gidNumber is set via a dedicated modify on both create and modify;
-        # plan() puts it in attr_changes for both actions.
-        if "gid_number" in planned["attr_changes"]:
-            io.set_gid_number(current["_dn"], planned["attr_changes"]["gid_number"])
+            if "gid_number" in planned["attr_changes"]:
+                io.set_gid_number(current["_dn"], planned["attr_changes"]["gid_number"])
 
         for dn in member_diff["adds"]:
             if io.add_member(current["_dn"], dn):

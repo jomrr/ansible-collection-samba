@@ -166,6 +166,23 @@ class SambaObjectIO:
         except ValueError:
             raise self.error_cls("path '%s' is not a valid distinguished name" % path)
 
+    def container_below_domain(self, path):
+        """Return ``path`` relative to the domain DN, the form ``newuser``/``newgroup`` take.
+
+        ``None`` for an unset path (samba's default container) and for the domain
+        root itself, which the relative form cannot express - the object is then
+        created in the default container and moved. A path that is not below the
+        domain is an error.
+        """
+        if path is None:
+            return None
+        container = self._desired_parent(path)
+        base = self.samdb.get_default_basedn()
+        if not container.is_child_of(base):
+            raise self.error_cls("path '%s' is not below the domain '%s'" % (path, base))
+        container.remove_base_components(len(base))
+        return str(container) or None
+
     def parent_exists(self, path):
         """Return True if the desired parent container exists."""
         return dn_exists(self.samdb, self._desired_parent(path))

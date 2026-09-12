@@ -188,15 +188,23 @@ implements `transaction_start/commit/cancel` as no-ops and AD offers no LDAP
 transactions, so the `transaction_*` calls that a local `sam.ldb` would honour
 give nothing here.
 
-Decision: a create is made all-or-nothing by **compensation**. In the logic
-layer, once the initial add of this run succeeded, every further step (move,
-attributes, enable state, gidNumber, membership) is guarded; if one fails, the
-object this run created is deleted again and the module fails with the cause
-and the note that the partial object was removed. Only an object that did not
-exist at the start of the run is ever removed (a concurrent create is reported,
-not undone). Changes to an existing object stay separate LDAP operations: a
-failure leaves the earlier steps applied, and the next run reconciles the rest
-(idempotency). `samba_ou` creates with a single add and needs no compensation.
+Decision: a create is made all-or-nothing by **compensation**. The add itself
+carries as much as samba's `newuser`/`newgroup` take (revised 2026-09-12): the
+container (`path`, relative to the domain DN), the names, mail, description
+and the POSIX attributes, so the common create is a single operation with no
+rename or modify after it. In the logic layer, once that add of this run
+succeeded, every remaining step (an explicit display name, the enabled state,
+membership, and the move a domain-root path needs because the relative form
+cannot express it) is guarded; if one fails, the object this run created is
+deleted again and the module fails with the cause and the note that the
+partial object was removed. Only an object that did not exist at the start of
+the run is ever removed (a concurrent create is reported, not undone). Changes
+to an existing object stay separate LDAP operations: a failure leaves the
+earlier steps applied, and the next run reconciles the rest (idempotency).
+`samba_ou` creates with a single add and needs no compensation. As with
+`samba-tool user create`, `newuser` derives `displayName` from the names when
+no explicit display name is given; the logic mirrors that derivation so the
+diff and check mode predict it.
 
 Verified live on all four distributions: samba's `newuser` adds the account
 first and sets the password second, but wraps that second step in its own

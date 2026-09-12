@@ -38,13 +38,15 @@ class FakeIO:
         self.calls.append(("resolve_member", name))
         return member_dn(name)
 
-    def create_group(self, name, group_type_value, description):
-        self.calls.append(("create_group", name, group_type_value, description))
+    def create_group(self, name, group_type_value, description, path, gid_number):
+        self.calls.append(("create_group", name, group_type_value, description, path, gid_number))
+        # Like newgroup: placed under path, gidNumber set on the add.
         self.current = {
             "description": description,
             "group_type": group_type_value,
+            "gid_number": gid_number,
             "members": [],
-            "_dn": "CN=%s,CN=Users,DC=example,DC=com" % name,
+            "_dn": "CN=%s,%s" % (name, path or "CN=Users,DC=example,DC=com"),
         }
 
     def set_description(self, dn, description):
@@ -127,7 +129,7 @@ def test_create_with_members():
     result = logic.run(make_params(description="staff", members=["jdoe", "asmith"]), False, fake)
     assert result["changed"] is True
     assert result["action"] == "created"
-    assert ("create_group", "engineers", logic.group_type("global", "security"), "staff") in fake.calls
+    assert ("create_group", "engineers", logic.group_type("global", "security"), "staff", None, None) in fake.calls
     assert ("add_member", member_dn("jdoe")) in fake.calls
     assert ("add_member", member_dn("asmith")) in fake.calls
 
@@ -160,7 +162,7 @@ def test_description_update_keeps_the_existing_type():
 def test_create_with_scope_only_uses_the_default_category():
     fake = FakeIO(current=None)
     logic.run(make_params(scope="universal"), False, fake)
-    assert ("create_group", "engineers", logic.group_type("universal", "security"), None) in fake.calls
+    assert ("create_group", "engineers", logic.group_type("universal", "security"), None, None, None) in fake.calls
 
 
 def test_modify_description():
@@ -259,11 +261,12 @@ def test_member_add_race_all_noop_reports_unchanged():
 
 # --- RFC2307/POSIX gid_number ---
 
-def test_gid_number_create_sets_it():
+def test_gid_number_create_sets_it_on_the_add():
     fake = FakeIO(current=None)
     result = logic.run(make_params(gid_number=10000), False, fake)
     assert result["changed"] is True
-    assert ("set_gid_number", 10000) in fake.calls
+    assert ("create_group", "engineers", logic.group_type("global", "security"), None, None, 10000) in fake.calls
+    assert "set_gid_number" not in call_names(fake)
     assert result["group"]["gid_number"] == 10000
 
 
@@ -327,10 +330,21 @@ def test_move_when_location_differs():
     assert ("move", "CN=engineers,CN=Users,DC=example,DC=com", "OU=Groups,DC=example,DC=com") in fake.calls
 
 
-def test_create_with_path_moves_after_create():
-    fake = _MovingIO(current=None)
+def test_create_with_path_places_the_group_directly():
+    fake = FakeIO(current=None)
     result = logic.run(make_params(path="OU=Groups,DC=example,DC=com"), False, fake)
     assert result["changed"] is True
+    assert (
+        "create_group", "engineers", logic.group_type("global", "security"), None, "OU=Groups,DC=example,DC=com", None,
+    ) in fake.calls
+    assert "move" not in call_names(fake)
+    assert result["group"]["dn"] == "CN=engineers,OU=Groups,DC=example,DC=com"
+
+
+def test_create_moves_afterwards_only_when_the_add_could_not_place_it():
+    # The domain root cannot be expressed as newgroup's relative container.
+    fake = _MovingIO(current=None)
+    logic.run(make_params(path="DC=example,DC=com"), False, fake)
     names = call_names(fake)
     assert names.index("create_group") < names.index("move")
 
@@ -430,13 +444,14 @@ def test_create_failure_on_member_add_removes_the_new_group():
     assert "Unwilling to perform" in str(excinfo.value)
 
 
-def test_create_failure_on_gid_removes_the_new_group():
-    class _GidFailIO(FakeIO):
-        def set_gid_number(self, dn, gid_number):
-            self.calls.append(("set_gid_number", gid_number))
+def test_create_failure_after_the_add_removes_the_new_group():
+    # newgroup raised after its add went through; the leftover is removed.
+    class _AddThenFailIO(FakeIO):
+        def create_group(self, name, group_type_value, description, path, gid_number):
+            FakeIO.create_group(self, name, group_type_value, description, path, gid_number)
             raise RuntimeError("0000202F: Constraint violation")
 
-    fake = _GidFailIO(current=None)
+    fake = _AddThenFailIO(current=None)
     with pytest.raises(logic.SambaGroupError):
         logic.run(make_params(gid_number=10000), False, fake)
     assert "delete" in call_names(fake)
@@ -445,8 +460,8 @@ def test_create_failure_on_gid_removes_the_new_group():
 
 def test_create_collision_is_not_undone():
     class _CollisionIO(FakeIO):
-        def create_group(self, name, group_type_value, description):
-            self.calls.append(("create_group", name, group_type_value, description))
+        def create_group(self, name, group_type_value, description, path, gid_number):
+            self.calls.append(("create_group", name, group_type_value, description, path, gid_number))
             raise logic.SambaGroupError("group 'engineers' already exists (created concurrently?)")
 
     fake = _CollisionIO(current=None)

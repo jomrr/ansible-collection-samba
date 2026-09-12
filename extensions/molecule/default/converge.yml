@@ -38,6 +38,14 @@
         password: "{{ _password }}"
         state: present
 
+    - name: Converge | Create a user with names only (samba derives the display name)
+      jomrr.samba.samba_user:
+        username: derived
+        given_name: Dee
+        surname: Rived
+        password: "{{ _password }}"
+        state: present
+
     - name: Converge | Change an attribute on an existing user
       jomrr.samba.samba_user:
         username: tomodify
@@ -189,6 +197,13 @@
       jomrr.samba.samba_group:
         name: posixgrp
         gid_number: 10000
+        state: present
+
+    - name: Converge | Create a group with a POSIX gid directly in an OU (one add)
+      jomrr.samba.samba_group:
+        name: posixnew
+        gid_number: 10001
+        path: "OU=loc_a,{{ samba_base_dn }}"
         state: present
 
     - name: Converge | Create a top-level OU

@@ -112,10 +112,11 @@ notes:
     O(server) over LDAP and obtain a Kerberos ticket for its realm will do;
     running on the DC itself, with O(server) pointing at it, is the simplest
     topology.
-  - Creating a group is all-or-nothing. LDAP offers no transactions, so if any
-    step after the initial add fails (placing it under I(path), setting
-    I(gid_number), adding a member), the module removes the group it just
-    created and fails with the cause. Changes to an existing group are separate
+  - Creating a group is all-or-nothing. The group is added in a single
+    operation, placed under I(path) with its type, description and
+    I(gid_number); members are added afterwards. LDAP offers no transactions,
+    so if adding a member fails, the module removes the group it just created
+    and fails with the cause. Changes to an existing group are separate
     LDAP operations; if one fails, the earlier ones stay applied and a re-run
     completes the rest.
 """
@@ -268,11 +269,19 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
             raise logic.SambaGroupError("member '%s' not found" % name)
         return str(res[0].dn)
 
-    def create_group(self, name, group_type_value, description):
-        """Create the group object via samba's newgroup."""
+    def create_group(self, name, group_type_value, description, path, gid_number):
+        """Create the group with one ``newgroup`` call.
+
+        The group is placed under ``path`` and gets its type, description and
+        gidNumber on the add itself; nothing is renamed or modified afterwards
+        for these. A concurrent creation is turned into a clear error.
+        """
         ldb = samba_ldb.load_ldb()
         try:
-            self.samdb.newgroup(name, grouptype=group_type_value, description=description)
+            self.samdb.newgroup(
+                name, groupou=self.container_below_domain(path), grouptype=group_type_value,
+                description=description, gidnumber=gid_number,
+            )
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
                 raise logic.SambaGroupError(

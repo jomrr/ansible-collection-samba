@@ -87,10 +87,10 @@ class FakeSamDB:
         self.captured = {"base": base, "scope": scope, "expression": expression, "attrs": attrs}
         return self.search_result
 
-    def newgroup(self, name, grouptype=None, description=None):
+    def newgroup(self, name, groupou=None, grouptype=None, description=None, gidnumber=None):
         if self.newgroup_error is not None:
             raise self.newgroup_error
-        self.created.append((name, grouptype, description))
+        self.created.append((name, groupou, grouptype, description, gidnumber))
 
     def modify(self, message):
         if self.modify_error is not None:
@@ -150,7 +150,15 @@ def test_resolve_member_not_found_raises():
 def test_create_group_collision_raises_clean():
     samdb = FakeSamDB(newgroup_error=FakeLdbError(FakeLdb.ERR_ENTRY_ALREADY_EXISTS, "exists"))
     with pytest.raises(logic.SambaGroupError):
-        make_io(samdb).create_group("engineers", logic.group_type("global", "security"), None)
+        make_io(samdb).create_group("engineers", logic.group_type("global", "security"), None, None, None)
+
+
+def test_create_group_passes_gid_and_type_to_newgroup():
+    # gidNumber goes onto the add itself (newgroup takes it); no modify follows.
+    samdb = FakeSamDB()
+    make_io(samdb).create_group("engineers", logic.group_type("global", "security"), "staff", None, 10000)
+    assert samdb.created == [("engineers", None, logic.group_type("global", "security"), "staff", 10000)]
+    assert samdb.modified == []
 
 
 def test_set_group_type_writes_signed_form():

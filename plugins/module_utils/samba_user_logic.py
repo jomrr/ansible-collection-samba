@@ -44,6 +44,15 @@ POSIX_ATTRS = ("uid_number", "gid_number", "unix_home_directory", "login_shell",
 #: The POSIX attributes whose value is an integer (LDAP INTEGER syntax).
 POSIX_INT_ATTRS = ("uid_number", "gid_number")
 
+#: The attributes samba's ``newuser`` sets on the add itself (the I/O maps them
+#: to its keyword arguments), so a create needs no modify for them.
+#: ``display_name`` is not among them: newuser derives displayName from the
+#: names; an explicit value is a follow-up write.
+CREATE_ATTRS = (
+    "given_name", "surname", "email", "description",
+    "uid_number", "gid_number", "unix_home_directory", "login_shell", "gecos",
+)
+
 #: ACCOUNTDISABLE bit inside the ``userAccountControl`` attribute.
 UAC_ACCOUNTDISABLE = 0x0002
 
@@ -84,6 +93,17 @@ def build_desired(params):
     if params.get("enabled") is not None:
         desired["enabled"] = params["enabled"]
     return desired
+
+
+def derived_display_name(desired):
+    """The displayName samba's ``newuser`` derives on create: the names joined.
+
+    Mirrors ``SamDB.fullname_from_names`` for the parts this module manages
+    (given name and surname), so the diff and check mode predict what a real
+    create leaves behind. ``None`` when neither name is given.
+    """
+    parts = (desired.get("given_name"), desired.get("surname"))
+    return " ".join(part for part in parts if part) or None
 
 
 def plan(state, current, desired):
@@ -142,6 +162,9 @@ def _effective_fields(current, desired, planned):
     else:
         fields = {name: None for name in ATTR_TO_LDAP}
         fields["enabled"] = desired.get("enabled", True)
+        # newuser derives displayName from the names; an explicit display_name
+        # in attr_changes overrides it below.
+        fields["display_name"] = derived_display_name(desired)
     fields.update(planned["attr_changes"])
     if planned["enable_change"] is not None:
         fields["enabled"] = planned["enable_change"]
@@ -196,7 +219,8 @@ def _undo_create(io, username, exc):
     LDAP offers no transactions (ldb's LDAP backend implements
     transaction_start/commit/cancel as no-ops), so a create is made
     all-or-nothing by compensation: whichever step failed after the initial
-    add (move, attributes, enable state), the object this run created is
+    add (an explicit display name, the enabled state, the move a domain-root
+    path needs), the object this run created is
     deleted again. Only an object that did not exist when the run started
     reaches this point, so nothing foreign is ever removed; if the failed step
     was the add itself, there is nothing to remove and only the cause is
@@ -308,9 +332,15 @@ def run(params, check_mode, io):
         return result
 
     created = planned["action"] == "create"
+    attr_changes = planned["attr_changes"]
     if created:
+        # One add: newuser places the account under path and sets the names,
+        # mail, description and POSIX attributes itself; only what it cannot
+        # take (an explicit display name) is written afterwards.
+        create_attrs = {name: value for name, value in attr_changes.items() if name in CREATE_ATTRS}
+        attr_changes = {name: value for name, value in attr_changes.items() if name not in CREATE_ATTRS}
         try:
-            io.create_user(username, password)
+            io.create_user(username, password, path, create_attrs)
         except SambaUserError:
             # A concurrent create: the object is not ours, nothing to undo.
             raise
@@ -323,18 +353,19 @@ def run(params, check_mode, io):
         if current is None:
             raise SambaUserError("user '%s' could not be read back after creation" % username)
 
-    # Order: move first (so the later attribute writes target the final DN),
-    # then attributes, enable state and password. Each is its own LDAP
-    # operation; on a fresh object a failure rolls the create back, on an
-    # existing object the earlier steps stay applied and a re-run completes
-    # the rest.
+    # Order: move first (so the later attribute writes target the final DN; a
+    # fresh account is already in place unless path is the domain root, which
+    # newuser cannot express), then attributes, enable state and password.
+    # Each is its own LDAP operation; on a fresh object a failure rolls the
+    # create back, on an existing object the earlier steps stay applied and a
+    # re-run completes the rest.
     try:
         if io.needs_move(current["_dn"], path):
             io.move(current["_dn"], path)
             current = io.read_current(username)
 
-        if planned["attr_changes"]:
-            io.apply_attrs(current["_dn"], planned["attr_changes"])
+        if attr_changes:
+            io.apply_attrs(current["_dn"], attr_changes)
         if planned["enable_change"] is not None:
             io.set_enabled(current["_dn"], current["_uac"], planned["enable_change"])
         if set_pw_on_existing:

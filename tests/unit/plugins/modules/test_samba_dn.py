@@ -54,6 +54,19 @@ class FakeDn:
     def add_base(self, parent):
         self.text = self.text + "," + parent.text
 
+    def _parts(self):
+        return [part.strip() for part in self.text.split(",") if part.strip()]
+
+    def __len__(self):
+        return len(self._parts())
+
+    def is_child_of(self, base):
+        mine, theirs = self._norm().split(","), base._norm().split(",")
+        return len(mine) >= len(theirs) and mine[len(mine) - len(theirs):] == theirs
+
+    def remove_base_components(self, count):
+        self.text = ",".join(self._parts()[:len(self._parts()) - count])
+
     def get_linearized(self):
         return self.text
 
@@ -78,6 +91,10 @@ class FakeSamDB:
         self.search_error = search_error
         self.rename_error = rename_error
         self.renamed = []
+        self.newuser_kwargs = None
+
+    def get_default_basedn(self):
+        return FakeDn("DC=example,DC=com")
 
     def search(self, base, scope, attrs):
         if self.search_error is not None:
@@ -88,6 +105,9 @@ class FakeSamDB:
         if self.rename_error is not None:
             raise self.rename_error
         self.renamed.append((str(old_dn), str(new_dn)))
+
+    def newuser(self, username, password, **kwargs):
+        self.newuser_kwargs = kwargs
 
 
 @pytest.fixture(autouse=True)
@@ -124,6 +144,32 @@ def test_dn_exists_true_and_false():
     assert samba_ldb.dn_exists(FakeSamDB(), FakeLdb().Dn(None, "OU=Eng,DC=example,DC=com")) is True
     samdb = FakeSamDB(search_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
     assert samba_ldb.dn_exists(samdb, FakeLdb().Dn(None, "OU=Missing,DC=example,DC=com")) is False
+
+
+# --- the container newuser/newgroup take: path relative to the domain ---
+
+def test_container_below_domain_strips_the_domain():
+    io = samba_user.SambaUserIO(FakeSamDB())
+    assert io.container_below_domain("OU=Eng,DC=example,DC=com") == "OU=Eng"
+    assert io.container_below_domain("OU=Sub,OU=Eng,DC=example,DC=com") == "OU=Sub,OU=Eng"
+
+
+def test_container_below_domain_none_for_default_and_domain_root():
+    io = samba_user.SambaUserIO(FakeSamDB())
+    assert io.container_below_domain(None) is None
+    # The relative form cannot express the root; the move afterwards handles it.
+    assert io.container_below_domain("DC=example,DC=com") is None
+
+
+def test_container_outside_the_domain_is_refused():
+    with pytest.raises(logic.SambaUserError):
+        samba_user.SambaUserIO(FakeSamDB()).container_below_domain("OU=Other,DC=other,DC=org")
+
+
+def test_create_user_places_the_account_via_userou():
+    samdb = FakeSamDB()
+    samba_user.SambaUserIO(samdb).create_user("jdoe", "pw", "OU=Eng,DC=example,DC=com", {"surname": "Doe"})
+    assert samdb.newuser_kwargs == {"userou": "OU=Eng", "surname": "Doe"}
 
 
 # --- SambaUserIO move wrapper ---
