@@ -14,7 +14,7 @@ COLLECTIONS_ROOT := $(CURDIR)/../../..
 
 .DEFAULT_GOAL := help
 
-.PHONY: help lint sanity units test molecule molecule-provision molecule-join-dc molecule-join-member molecule-join-sssd build changelog promote release release-dry docs docs-clean clean
+.PHONY: help lint sanity units test molecule molecule-provision molecule-join-dc molecule-join-member molecule-join-sssd build changelog promote release release-dry galaxy docs docs-clean clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -78,6 +78,18 @@ release: ## Cut a release locally (semantic-release; needs GH_TOKEN, on main)
 
 release-dry: ## Compute the next version without committing, tagging or releasing
 	semantic-release --noop version --no-changelog
+
+# The version galaxy.yml carries, resolved when the recipe runs (not at parse
+# time), so `make release galaxy` publishes the version release just bumped.
+VERSION = $(shell sed -n 's/^version: *//p' galaxy.yml)
+
+# Publishes the tarball `make release` left in dist/ (PSR's build_command
+# builds dist/jomrr-samba-<version>.tar.gz for the version it bumped galaxy.yml
+# to), so Galaxy gets the asset of the GitHub release, not a fresh build of the
+# working tree. ansible-galaxy reads the API key from ~/.ansible/galaxy_token
+# (ANSIBLE_GALAXY_TOKEN_PATH), a YAML file with `token: <key>`.
+galaxy: ## Publish the released tarball to Ansible Galaxy (after `make release`)
+	ansible-galaxy collection publish dist/jomrr-samba-$(VERSION).tar.gz
 
 clean: ## Remove build artifacts (dist/)
 	rm -rf dist/
