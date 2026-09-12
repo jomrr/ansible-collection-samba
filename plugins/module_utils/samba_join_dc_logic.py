@@ -12,6 +12,8 @@ without the bindings.
 
 from __future__ import annotations
 
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_lifecycle_logic as lifecycle
+
 
 class SambaJoinDcError(Exception):
     """User-facing error the module turns into ``fail_json``."""
@@ -35,27 +37,20 @@ def run(params, check_mode, io):
       * already a DC of the target realm -> idempotent no-op; never re-join.
       * already a DC of a *different* domain -> a clear error; the host's
         existing DC role is never overwritten.
+    The remaining decision is the shared :func:`samba_lifecycle_logic.ensure`.
     """
     realm = params["realm"].lower()
     current = io.read_state()
 
     if current is not None:
-        if current["dnsdomain"] == realm:
-            return {
-                "changed": False,
-                "joined": True,
-                "domain": {"domaindn": current["domaindn"], "domainsid": current["domainsid"]},
-            }
-        raise SambaJoinDcError(
-            "this host is already a domain controller of '%s', not the join target "
-            "'%s'; refusing to overwrite an existing domain" % (current["dnsdomain"], realm)
-        )
+        if current["dnsdomain"] != realm:
+            raise SambaJoinDcError(
+                "this host is already a domain controller of '%s', not the join target "
+                "'%s'; refusing to overwrite an existing domain" % (current["dnsdomain"], realm)
+            )
+        current = {"domaindn": current["domaindn"], "domainsid": current["domainsid"]}
 
-    if not params.get("bind_password"):
-        raise SambaJoinDcError("bind_password is required to join a domain")
-
-    if check_mode:
-        return {"changed": True, "joined": False, "domain": None}
-
-    domain = io.join(params)
-    return {"changed": True, "joined": True, "domain": domain}
+    return lifecycle.ensure(
+        current, params, check_mode, io.join, SambaJoinDcError,
+        flag="joined", secret="bind_password", action="join a domain",
+    )

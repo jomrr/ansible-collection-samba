@@ -227,7 +227,7 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
 
@@ -255,7 +255,7 @@ class SambaDnsRecordIO:
 
     def _node_dn(self, zone, name):
         """Build the dnsNode DN ``DC=<name>,<zone_dn>`` with the name escaped."""
-        return samba_user_io.build_child_dn(self.samdb, "DC", name, self._zone_dn(zone))
+        return samba_ldb.build_child_dn(self.samdb, "DC", name, self._zone_dn(zone))
 
     def _read_node(self, node_dn):
         """Return ``(raw dnsRecord values, tombstoned)`` of a node, or None if absent.
@@ -263,7 +263,7 @@ class SambaDnsRecordIO:
         Unlike the read path this deliberately sees tombstoned nodes: ``add``
         has to revive one rather than create a node that already exists.
         """
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         try:
             res = self.samdb.search(base=node_dn, scope=ldb.SCOPE_BASE, attrs=["dnsRecord", "dNSTombstoned"])
         except ldb.LdbError as err:
@@ -274,7 +274,7 @@ class SambaDnsRecordIO:
             return None
         element = res[0].get("dnsRecord")
         raw = list(element) if element is not None else []
-        tombstoned = (samba_user_io.first_value(res[0], "dNSTombstoned") or "").upper() == "TRUE"
+        tombstoned = (samba_ldb.first_value(res[0], "dNSTombstoned") or "").upper() == "TRUE"
         return raw, tombstoned
 
     def zone_exists(self, zone):
@@ -307,7 +307,7 @@ class SambaDnsRecordIO:
         flag is cleared in one modify - the state samba's own
         ``dns_common_replace`` writes when it revives a node.
         """
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         ndr = samba_dns_io.load_ndr()
         records = [rec for rec in self._live_records(raw) if not self._matches(rec, spec)]
         records.append(samba_dns_io.build_record(spec, serial))
@@ -320,7 +320,7 @@ class SambaDnsRecordIO:
 
     def _create_node(self, node_dn, spec, serial):
         """Create a new dnsNode holding the single desired record."""
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         ndr = samba_dns_io.load_ndr()
         message = ldb.Message(node_dn)
         message["objectClass"] = ldb.MessageElement(["top", "dnsNode"], ldb.FLAG_MOD_ADD, "objectClass")
@@ -362,7 +362,7 @@ class SambaDnsRecordIO:
         revived instead (see :meth:`_revive`). The zone serial is raised right
         before the write, as samba-tool does, never for a no-op.
         """
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         ndr = samba_dns_io.load_ndr()
         node_dn = self._node_dn(zone, name)
         node = self._read_node(node_dn)
@@ -410,7 +410,7 @@ class SambaDnsRecordIO:
         node is re-read rather than overwritten. A record gone meanwhile is
         added again, so the desired state holds either way.
         """
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         ndr = samba_dns_io.load_ndr()
         node_dn = self._node_dn(zone, name)
         attempt = 0
@@ -448,7 +448,7 @@ class SambaDnsRecordIO:
         garbage collection. A value that vanished meanwhile fails with
         ERR_NO_SUCH_ATTRIBUTE and the node is re-read.
         """
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         ndr = samba_dns_io.load_ndr()
         node_dn = self._node_dn(zone, name)
         attempt = 0

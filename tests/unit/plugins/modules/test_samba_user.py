@@ -52,8 +52,8 @@ class FakeIO:
         self.calls.append(("set_enabled", dn, enabled))
         self.current["enabled"] = enabled
 
-    def delete_user(self, dn):
-        self.calls.append(("delete_user", dn))
+    def delete(self, dn):
+        self.calls.append(("delete", dn))
         self.current = None
         return True
 
@@ -211,7 +211,7 @@ def test_absent_on_existing_deletes():
     fake = FakeIO(current=existing_user())
     result = logic.run(make_params(state="absent"), False, fake)
     assert result["changed"] is True
-    assert "delete_user" in call_names(fake)
+    assert "delete" in call_names(fake)
     assert result["user"]["state"] == "absent"
 
 
@@ -219,15 +219,15 @@ def test_check_mode_absent_does_not_delete():
     fake = FakeIO(current=existing_user())
     result = logic.run(make_params(state="absent"), True, fake)
     assert result["changed"] is True
-    assert "delete_user" not in call_names(fake)
+    assert "delete" not in call_names(fake)
 
 
 def test_delete_race_already_gone_is_noop():
-    # The object was deleted concurrently between read and write: delete_user
+    # The object was deleted concurrently between read and write: delete
     # reports it was already gone, so the run is an honest no-op.
     class GoneIO(FakeIO):
-        def delete_user(self, dn):
-            self.calls.append(("delete_user", dn))
+        def delete(self, dn):
+            self.calls.append(("delete", dn))
             return False
 
     fake = GoneIO(current=existing_user())
@@ -235,7 +235,7 @@ def test_delete_race_already_gone_is_noop():
     assert result["changed"] is False
     assert result["action"] == "unchanged"
     assert result["diff"] == {"before": {}, "after": {}}
-    assert "delete_user" in call_names(fake)
+    assert "delete" in call_names(fake)
 
 
 def test_password_not_leaked_in_result_or_diff():
@@ -501,7 +501,7 @@ def test_create_failure_after_add_removes_the_new_object():
     with pytest.raises(logic.SambaUserError) as excinfo:
         logic.run(make_params(given_name="Jane", password="S3cret!"), False, fake)
     names = call_names(fake)
-    assert names.index("create_user") < names.index("delete_user")
+    assert names.index("create_user") < names.index("delete")
     assert fake.current is None
     assert "partially created object was removed" in str(excinfo.value)
     assert "Constraint violation" in str(excinfo.value)
@@ -518,7 +518,7 @@ def test_create_with_rejected_password_removes_half_created_account():
     fake = _WeakPasswordIO(current=None)
     with pytest.raises(logic.SambaUserError) as excinfo:
         logic.run(make_params(password="Weak-Pass-1"), False, fake)
-    assert "delete_user" in call_names(fake)
+    assert "delete" in call_names(fake)
     assert fake.current is None
     assert "removed" in str(excinfo.value)
     # The cause is reported, the password never is.
@@ -527,8 +527,8 @@ def test_create_with_rejected_password_removes_half_created_account():
 
 def test_create_undo_failure_reports_both_errors():
     class _StuckIO(_AttrsFailIO):
-        def delete_user(self, dn):
-            self.calls.append(("delete_user", dn))
+        def delete(self, dn):
+            self.calls.append(("delete", dn))
             raise RuntimeError("busy")
 
     fake = _StuckIO(current=None)
@@ -548,12 +548,12 @@ def test_create_collision_is_not_undone():
     with pytest.raises(logic.SambaUserError):
         logic.run(make_params(password="S3cret!"), False, fake)
     # The object is somebody else's: never deleted.
-    assert "delete_user" not in call_names(fake)
+    assert "delete" not in call_names(fake)
 
 
 def test_modify_failure_leaves_the_existing_object_alone():
     fake = _AttrsFailIO(current=existing_user(given_name="Old"))
     with pytest.raises(RuntimeError):
         logic.run(make_params(given_name="New"), False, fake)
-    assert "delete_user" not in call_names(fake)
+    assert "delete" not in call_names(fake)
     assert fake.current is not None

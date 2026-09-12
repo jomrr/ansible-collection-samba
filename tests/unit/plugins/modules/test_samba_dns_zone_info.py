@@ -15,7 +15,7 @@ from ansible.module_utils.testing import patch_module_args
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_zone_logic as logic
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_dns_zone_info as info
 
 DOMAIN_DN = "DC=example.com,CN=MicrosoftDNS,DC=DomainDnsZones,DC=example,DC=com"
@@ -113,7 +113,7 @@ class FakeSamDB:
 
 def test_list_zone_entries_escapes_filter_value(monkeypatch):
     fake_ldb = FakeLdb()
-    monkeypatch.setattr(samba_user_io, "load_ldb", lambda: fake_ldb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", lambda: fake_ldb)
     samdb = FakeSamDB(result=[])
     samba_dns_io.list_zone_entries(samdb, "evil)(objectClass=*)")
     assert "evil)(objectClass=*)" in fake_ldb.encoded
@@ -124,7 +124,7 @@ def test_list_zone_entries_escapes_filter_value(monkeypatch):
 
 def test_list_zone_entries_all_uses_objectclass_filter(monkeypatch):
     fake_ldb = FakeLdb()
-    monkeypatch.setattr(samba_user_io, "load_ldb", lambda: fake_ldb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", lambda: fake_ldb)
     samdb = FakeSamDB(result=[FakeMessage("example.com", DOMAIN_DN)])
     entries = samba_dns_io.list_zone_entries(samdb, None)
     assert entries == [("example.com", DOMAIN_DN)]

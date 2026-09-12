@@ -14,7 +14,7 @@ from ansible.module_utils import basic
 from ansible.module_utils.testing import patch_module_args
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_group_info
 
 
@@ -70,7 +70,7 @@ def test_module_imports_without_samba():
 
 def test_query_escapes_filter_value(monkeypatch):
     fake_ldb = FakeLdb()
-    monkeypatch.setattr(samba_user_io, "load_ldb", lambda: fake_ldb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", lambda: fake_ldb)
     samdb = FakeSamDB(result=[])
     samba_group_info.query(samdb, "evil)(uid=*)")
     assert "evil)(uid=*)" in fake_ldb.encoded
@@ -79,7 +79,7 @@ def test_query_escapes_filter_value(monkeypatch):
 
 def test_query_all_groups_uses_objectclass_filter(monkeypatch):
     fake_ldb = FakeLdb()
-    monkeypatch.setattr(samba_user_io, "load_ldb", lambda: fake_ldb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", lambda: fake_ldb)
     samdb = FakeSamDB(result=[group_msg("a", logic.group_type("global", "security"))])
     groups = samba_group_info.query(samdb, None)
     assert [g["name"] for g in groups] == ["a"]
@@ -88,7 +88,7 @@ def test_query_all_groups_uses_objectclass_filter(monkeypatch):
 
 
 def test_query_single_decodes_scope_and_category(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(result=[
         group_msg(
             "engineers", logic.group_type("global", "security"),
@@ -110,7 +110,7 @@ def test_query_single_decodes_scope_and_category(monkeypatch):
 @pytest.mark.parametrize("category", ["security", "distribution"])
 def test_query_decode_roundtrip_matches_samba_group_encoding(monkeypatch, scope, category):
     # The info decode must agree with the encode samba_group uses as input.
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(result=[group_msg("g", logic.group_type(scope, category))])
     group = samba_group_info.query(samdb, "g")[0]
     assert (group["scope"], group["category"]) == (scope, category)
@@ -118,20 +118,20 @@ def test_query_decode_roundtrip_matches_samba_group_encoding(monkeypatch, scope,
 
 def test_query_decodes_signed_group_type(monkeypatch):
     # groupType stored signed (-2147483646) must decode to global/security.
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(result=[group_msg("g", -2147483646)])
     group = samba_group_info.query(samdb, "g")[0]
     assert (group["scope"], group["category"]) == ("global", "security")
 
 
 def test_query_missing_group_is_empty(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     assert samba_group_info.query(FakeSamDB(result=[]), "ghost") == []
 
 
 def test_query_returns_gid_number(monkeypatch):
     # Field name matches the samba_group write param, so _info round-trips back.
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(result=[
         group_msg("engineers", logic.group_type("global", "security"), gidNumber="10000"),
     ])
@@ -140,7 +140,7 @@ def test_query_returns_gid_number(monkeypatch):
 
 
 def test_query_missing_gid_number_is_none(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(result=[group_msg("g", logic.group_type("global", "security"))])
     assert samba_group_info.query(samdb, "g")[0]["gid_number"] is None
 
@@ -154,7 +154,7 @@ def _exit_json(*args, **kwargs):
 
 
 def _run_main(monkeypatch, check_mode):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     monkeypatch.setattr(
         samba_group_info, "connect_samdb",
         lambda module: FakeSamDB(result=[group_msg("engineers", logic.group_type("global", "security"))]),

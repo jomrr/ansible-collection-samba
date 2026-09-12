@@ -3,7 +3,7 @@
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_ou LDB I/O layer.
 
-A fake ``ldb`` module is injected (via samba_user_io.load_ldb), so these run
+A fake ``ldb`` module is injected (via samba_ldb.load_ldb), so these run
 without the samba bindings while exercising the safe DN construction and the
 concurrent-change (race) handling."""
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_ou
 
 
@@ -111,7 +111,7 @@ class FakeSamDB:
 
 @pytest.fixture(autouse=True)
 def _patch_ldb(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
 
 
 def make_io(samdb):

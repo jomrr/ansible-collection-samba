@@ -112,7 +112,7 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
 
@@ -126,7 +126,7 @@ def query(samdb, name, path):
     before it enters the search filter, so it cannot break out into LDAP filter
     syntax. A missing ``path`` base maps to an empty result.
     """
-    ldb = samba_user_io.load_ldb()
+    ldb = samba_ldb.load_ldb()
     base = path if path is not None else samdb.domain_dn()
     if name is None:
         scope = ldb.SCOPE_SUBTREE

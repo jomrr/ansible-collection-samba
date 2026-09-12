@@ -115,7 +115,7 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
 
@@ -126,7 +126,7 @@ def query(samdb, name):
     The ``name`` is escaped via ``ldb.binary_encode`` before it enters the
     search filter, so it cannot break out into LDAP filter syntax.
     """
-    ldb = samba_user_io.load_ldb()
+    ldb = samba_ldb.load_ldb()
     if name is None:
         expression = "(objectClass=group)"
     else:
@@ -138,7 +138,7 @@ def query(samdb, name):
         attrs=samba_group_io.GROUP_ATTRS,
     )
     return [
-        logic.public_state(samba_group_io.message_to_state(message), samba_user_io.first_value(message, "sAMAccountName"))
+        logic.public_state(samba_group_io.message_to_state(message), samba_ldb.first_value(message, "sAMAccountName"))
         for message in res
     ]
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
-"""Unit tests for the shared DN/move I/O (samba_user_io helpers + SambaUserIO move).
+"""Unit tests for the shared DN/move I/O (samba_ldb helpers + SambaUserIO move).
 
 A fake ``ldb`` whose ``Dn`` models ldb's *normalized* equality is injected, so the
 move/no-move decision is exercised without the bindings. The real normalization
@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_user
 
 
@@ -92,38 +92,38 @@ class FakeSamDB:
 
 @pytest.fixture(autouse=True)
 def _patch_ldb(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
 
 
 # --- shared helpers ---
 
 def test_same_parent_is_case_and_space_insensitive():
     # The idempotence trap: differing case/spacing must NOT look like a change.
-    assert samba_user_io.same_parent(
+    assert samba_ldb.same_parent(
         FakeSamDB(), "CN=jdoe,ou=eng,dc=example,dc=com", FakeLdb().Dn(None, "OU=Eng, DC=Example,DC=COM"))
 
 
 def test_same_parent_detects_real_difference():
-    assert not samba_user_io.same_parent(
+    assert not samba_ldb.same_parent(
         FakeSamDB(), "CN=jdoe,CN=Users,DC=example,DC=com", FakeLdb().Dn(None, "OU=Eng,DC=example,DC=com"))
 
 
 def test_build_child_dn_escapes_name_via_set_component():
     parent = FakeLdb().Dn(None, "OU=Eng,DC=example,DC=com")
-    dn = samba_user_io.build_child_dn(FakeSamDB(), "CN", "ev,il", parent)
+    dn = samba_ldb.build_child_dn(FakeSamDB(), "CN", "ev,il", parent)
     assert (0, "CN", "ev,il") in dn.set_calls
 
 
 def test_reparent_preserves_rdn():
     parent = FakeLdb().Dn(None, "OU=Eng,DC=example,DC=com")
-    target = samba_user_io.reparent_dn(FakeSamDB(), "CN=Jane Doe,CN=Users,DC=example,DC=com", parent)
+    target = samba_ldb.reparent_dn(FakeSamDB(), "CN=Jane Doe,CN=Users,DC=example,DC=com", parent)
     assert target.get_linearized() == "CN=Jane Doe,OU=Eng,DC=example,DC=com"
 
 
 def test_dn_exists_true_and_false():
-    assert samba_user_io.dn_exists(FakeSamDB(), FakeLdb().Dn(None, "OU=Eng,DC=example,DC=com")) is True
+    assert samba_ldb.dn_exists(FakeSamDB(), FakeLdb().Dn(None, "OU=Eng,DC=example,DC=com")) is True
     samdb = FakeSamDB(search_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
-    assert samba_user_io.dn_exists(samdb, FakeLdb().Dn(None, "OU=Missing,DC=example,DC=com")) is False
+    assert samba_ldb.dn_exists(samdb, FakeLdb().Dn(None, "OU=Missing,DC=example,DC=com")) is False
 
 
 # --- SambaUserIO move wrapper ---

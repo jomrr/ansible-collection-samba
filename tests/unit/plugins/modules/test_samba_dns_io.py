@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 
 
 class FakeDnsp:
@@ -141,7 +141,7 @@ class CapturingSamDB:
 
 
 def test_read_node_specs_treats_tombstoned_node_as_absent(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = CapturingSamDB()
     assert samba_dns_io.read_node_specs(samdb, "DC=www,DC=example.com") is None
     # The base-scope read carries the DNS server's own node filter, so a

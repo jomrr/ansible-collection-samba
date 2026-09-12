@@ -134,7 +134,7 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
 
@@ -143,7 +143,7 @@ class SambaOuIO:
     """LDB read/write operations for organizational units.
 
     The ldb bindings are imported lazily (via the shared
-    ``samba_user_io.load_ldb``), so importing this module never requires them.
+    ``samba_ldb.load_ldb``), so importing this module never requires them.
     DNs are built with ``ldb.Dn.set_component`` so the name value is escaped and
     cannot inject extra DN components.
     """
@@ -154,22 +154,22 @@ class SambaOuIO:
     def _ou_dn(self, name, path):
         """Build the OU distinguished name safely from ``name`` and ``path``."""
         try:
-            parent = samba_user_io.parse_dn(self.samdb, path)
+            parent = samba_ldb.parse_dn(self.samdb, path)
         except ValueError:
             raise logic.SambaOuError("path '%s' is not a valid distinguished name" % path)
-        return samba_user_io.build_child_dn(self.samdb, "OU", name, parent)
+        return samba_ldb.build_child_dn(self.samdb, "OU", name, parent)
 
     def parent_exists(self, path):
         """Return True if the parent container ``path`` exists (a read-only probe)."""
         try:
-            parent = samba_user_io.parse_dn(self.samdb, path)
+            parent = samba_ldb.parse_dn(self.samdb, path)
         except ValueError:
             raise logic.SambaOuError("path '%s' is not a valid distinguished name" % path)
-        return samba_user_io.dn_exists(self.samdb, parent)
+        return samba_ldb.dn_exists(self.samdb, parent)
 
     def read_current(self, name, path):
         """Return the normalized current state of the OU or ``None``."""
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         dn = self._ou_dn(name, path)
         try:
             res = self.samdb.search(base=dn, scope=ldb.SCOPE_BASE, attrs=samba_ou_io.OU_ATTRS)
@@ -183,7 +183,7 @@ class SambaOuIO:
 
     def create_ou(self, name, path, description):
         """Create the OU. A concurrent create or a missing parent fail cleanly."""
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         dn = self._ou_dn(name, path)
         try:
             self.samdb.create_ou(dn, description=description)
@@ -202,7 +202,7 @@ class SambaOuIO:
         Removing a description that is already gone is an idempotent no-op; a
         vanished object maps to a clear error.
         """
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
         if description is None:
@@ -225,7 +225,7 @@ class SambaOuIO:
         OU fails cleanly (the DC rejects deleting a non-leaf), which also covers
         the race where a child appears just before deletion.
         """
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         try:
             self.samdb.delete(ldb.Dn(self.samdb, dn))
             return True

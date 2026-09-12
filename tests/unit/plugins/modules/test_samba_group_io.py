@@ -3,7 +3,7 @@
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_group LDB I/O layer.
 
-A fake ``ldb`` module is injected (via samba_user_io.load_ldb), so these run
+A fake ``ldb`` module is injected (via samba_ldb.load_ldb), so these run
 without the samba bindings while exercising the real escaping, the groupType
 write encoding, and the concurrent-change (race) handling."""
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_group
 
 
@@ -105,7 +105,7 @@ class FakeSamDB:
 
 @pytest.fixture(autouse=True)
 def _patch_ldb(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
 
 
 def make_io(samdb):
@@ -227,12 +227,12 @@ def test_add_member_success_returns_true():
     assert samdb.modified
 
 
-def test_delete_group_already_gone_returns_false():
+def test_delete_already_gone_returns_false():
     samdb = FakeSamDB(delete_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
-    assert make_io(samdb).delete_group("CN=g,DC=example,DC=com") is False
+    assert make_io(samdb).delete("CN=g,DC=example,DC=com") is False
 
 
-def test_delete_group_success_returns_true():
+def test_delete_success_returns_true():
     samdb = FakeSamDB()
-    assert make_io(samdb).delete_group("CN=g,DC=example,DC=com") is True
+    assert make_io(samdb).delete("CN=g,DC=example,DC=com") is True
     assert samdb.deleted

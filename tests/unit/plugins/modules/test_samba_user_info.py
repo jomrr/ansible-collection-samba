@@ -14,7 +14,7 @@ import pytest
 from ansible.module_utils import basic
 from ansible.module_utils.testing import patch_module_args
 
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_user_info
 
 
@@ -70,7 +70,7 @@ def test_module_imports_without_samba():
 
 def test_query_escapes_filter_value(monkeypatch):
     fake_ldb = FakeLdb()
-    monkeypatch.setattr(samba_user_io, "load_ldb", lambda: fake_ldb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", lambda: fake_ldb)
     samdb = FakeSamDB(result=[])
     samba_user_info.query(samdb, "evil)(uid=*)")
     # The raw value went through the escaper, and the filter carries the escaped
@@ -80,7 +80,7 @@ def test_query_escapes_filter_value(monkeypatch):
 
 
 def test_query_single_existing_user(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(result=[user_msg("jdoe", givenName="Jane", sn="Doe")])
     users = samba_user_info.query(samdb, "jdoe")
     assert len(users) == 1
@@ -90,14 +90,14 @@ def test_query_single_existing_user(monkeypatch):
 
 
 def test_query_single_missing_user_is_empty(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     assert samba_user_info.query(FakeSamDB(result=[]), "ghost") == []
 
 
 def test_query_returns_posix_attributes(monkeypatch):
     # The _info output uses the same field names as the samba_user write params
     # (uid_number etc.), so it round-trips straight back as write input.
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(result=[
         user_msg("jdoe", uidNumber="10001", gidNumber="10000", loginShell="/bin/bash"),
     ])
@@ -112,7 +112,7 @@ def test_query_returns_posix_attributes(monkeypatch):
 
 def test_query_all_users_returns_list(monkeypatch):
     fake_ldb = FakeLdb()
-    monkeypatch.setattr(samba_user_io, "load_ldb", lambda: fake_ldb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", lambda: fake_ldb)
     samdb = FakeSamDB(result=[user_msg("alice"), user_msg("bob")])
     users = samba_user_info.query(samdb, None)
     assert [u["username"] for u in users] == ["alice", "bob"]
@@ -130,7 +130,7 @@ def _exit_json(*args, **kwargs):
 
 
 def _run_main(monkeypatch, check_mode):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     monkeypatch.setattr(
         samba_user_info, "connect_samdb",
         lambda module: FakeSamDB(result=[user_msg("jdoe", givenName="Jane")]),

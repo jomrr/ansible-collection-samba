@@ -69,8 +69,8 @@ class FakeIO:
         self.current["members"] = [m for m in self.current["members"] if m != dn]
         return True
 
-    def delete_group(self, dn):
-        self.calls.append(("delete_group", dn))
+    def delete(self, dn):
+        self.calls.append(("delete", dn))
         self.current = None
         return True
 
@@ -227,14 +227,14 @@ def test_absent_on_existing_deletes():
     fake = FakeIO(current=existing_group())
     result = logic.run(make_params(state="absent"), False, fake)
     assert result["changed"] is True
-    assert "delete_group" in call_names(fake)
+    assert "delete" in call_names(fake)
     assert result["group"]["state"] == "absent"
 
 
 def test_delete_race_already_gone_is_noop():
     class GoneIO(FakeIO):
-        def delete_group(self, dn):
-            self.calls.append(("delete_group", dn))
+        def delete(self, dn):
+            self.calls.append(("delete", dn))
             return False
 
     fake = GoneIO(current=existing_group())
@@ -424,7 +424,7 @@ def test_create_failure_on_member_add_removes_the_new_group():
     with pytest.raises(logic.SambaGroupError) as excinfo:
         logic.run(make_params(members=["jdoe"]), False, fake)
     names = call_names(fake)
-    assert names.index("create_group") < names.index("delete_group")
+    assert names.index("create_group") < names.index("delete")
     assert fake.current is None
     assert "partially created object was removed" in str(excinfo.value)
     assert "Unwilling to perform" in str(excinfo.value)
@@ -439,7 +439,7 @@ def test_create_failure_on_gid_removes_the_new_group():
     fake = _GidFailIO(current=None)
     with pytest.raises(logic.SambaGroupError):
         logic.run(make_params(gid_number=10000), False, fake)
-    assert "delete_group" in call_names(fake)
+    assert "delete" in call_names(fake)
     assert fake.current is None
 
 
@@ -452,12 +452,12 @@ def test_create_collision_is_not_undone():
     fake = _CollisionIO(current=None)
     with pytest.raises(logic.SambaGroupError):
         logic.run(make_params(), False, fake)
-    assert "delete_group" not in call_names(fake)
+    assert "delete" not in call_names(fake)
 
 
 def test_modify_failure_leaves_the_existing_group_alone():
     fake = _MemberFailIO(current=existing_group())
     with pytest.raises(RuntimeError):
         logic.run(make_params(members=["jdoe"]), False, fake)
-    assert "delete_group" not in call_names(fake)
+    assert "delete" not in call_names(fake)
     assert fake.current is not None

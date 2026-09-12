@@ -11,6 +11,8 @@ actual provisioning and the local ``sam.ldb`` probe happen through an injected
 
 from __future__ import annotations
 
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_lifecycle_logic as lifecycle
+
 
 class SambaProvisionError(Exception):
     """User-facing error the module turns into ``fail_json``."""
@@ -40,17 +42,10 @@ def run(params, check_mode, io):
 
     ``state`` is always ``present``. An already-provisioned host is an idempotent
     no-op: it is never re-provisioned and never reconciled against the
-    parameters - ``present`` means only "ensure a DC exists here".
+    parameters - ``present`` means only "ensure a DC exists here". The decision
+    itself is the shared :func:`samba_lifecycle_logic.ensure`.
     """
-    current = io.read_state()
-    if current is not None:
-        return {"changed": False, "provisioned": True, "domain": current}
-
-    if not params.get("admin_password"):
-        raise SambaProvisionError("admin_password is required to provision a new domain")
-
-    if check_mode:
-        return {"changed": True, "provisioned": False, "domain": None}
-
-    domain = io.provision(params)
-    return {"changed": True, "provisioned": True, "domain": domain}
+    return lifecycle.ensure(
+        io.read_state(), params, check_mode, io.provision, SambaProvisionError,
+        flag="provisioned", secret="admin_password", action="provision a new domain",
+    )

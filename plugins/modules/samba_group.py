@@ -224,24 +224,25 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
 
 
-class SambaGroupIO:
+class SambaGroupIO(samba_ldb.SambaObjectIO):
     """LDB read/write operations for groups.
 
-    The samba/ldb bindings are imported lazily (via the shared
-    ``samba_user_io.load_ldb``), so importing this module never requires them.
+    The shared modify, delete and move operations come from
+    :class:`samba_ldb.SambaObjectIO`; the samba/ldb bindings are imported lazily
+    (via ``samba_ldb.load_ldb``), so importing this module never requires them.
     """
 
-    def __init__(self, samdb):
-        self.samdb = samdb
+    error_cls = logic.SambaGroupError
+    noun = "group"
 
     def read_current(self, name):
         """Return the normalized current state of group ``name`` or ``None``."""
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         expression = "(&(objectClass=group)(sAMAccountName=%s))" % ldb.binary_encode(name)
         res = self.samdb.search(
             base=self.samdb.domain_dn(),
@@ -255,7 +256,7 @@ class SambaGroupIO:
 
     def resolve_member(self, name):
         """Resolve a member's sAMAccountName to its DN; the name is escaped."""
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         expression = "(sAMAccountName=%s)" % ldb.binary_encode(name)
         res = self.samdb.search(
             base=self.samdb.domain_dn(),
@@ -269,7 +270,7 @@ class SambaGroupIO:
 
     def create_group(self, name, group_type_value, description):
         """Create the group object via samba's newgroup."""
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         try:
             self.samdb.newgroup(name, grouptype=group_type_value, description=description)
         except ldb.LdbError as err:
@@ -285,7 +286,7 @@ class SambaGroupIO:
         Removing a description that is already gone is an idempotent no-op; a
         vanished object fails cleanly.
         """
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
         if description is None:
@@ -304,29 +305,23 @@ class SambaGroupIO:
         Fails cleanly if the object was removed (concurrent delete) before the
         modify reached the DC.
         """
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
         message["gidNumber"] = ldb.MessageElement(str(gid_number), ldb.FLAG_MOD_REPLACE, "gidNumber")
         self._modify(message, dn)
 
-    def rfc2307_provisioned(self):
-        """True if the domain was provisioned with C(--use-rfc2307)."""
-        return samba_user_io.rfc2307_provisioned(self.samdb)
-
     def set_group_type(self, dn, group_type_value):
         """Replace the groupType. A rejected scope/category change fails cleanly."""
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
         message["groupType"] = ldb.MessageElement(
             logic.normalise_int32(group_type_value), ldb.FLAG_MOD_REPLACE, "groupType"
         )
         try:
-            self.samdb.modify(message)
+            self._modify(message, dn)
         except ldb.LdbError as err:
-            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                raise logic.SambaGroupError("group '%s' vanished before it could be modified" % dn)
             if err.args[0] in (ldb.ERR_UNWILLING_TO_PERFORM, ldb.ERR_CONSTRAINT_VIOLATION):
                 raise logic.SambaGroupError(
                     "samba rejected the scope/category change for group '%s'" % dn
@@ -341,20 +336,9 @@ class SambaGroupIO:
         """Remove a member DN. Returns False if it was already absent (no-op)."""
         return self._member_op(group_dn, member_dn, add=False)
 
-    def delete_group(self, dn):
-        """Delete the group by DN. Returns False if it was already gone (no-op)."""
-        ldb = samba_user_io.load_ldb()
-        try:
-            self.samdb.delete(ldb.Dn(self.samdb, dn))
-            return True
-        except ldb.LdbError as err:
-            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                return False
-            raise
-
     def _member_op(self, group_dn, member_dn, add):
         """Add or remove one member; concurrent-change races become no-ops."""
-        ldb = samba_user_io.load_ldb()
+        ldb = samba_ldb.load_ldb()
         flag = ldb.FLAG_MOD_ADD if add else ldb.FLAG_MOD_DELETE
         already = ldb.ERR_ATTRIBUTE_OR_VALUE_EXISTS if add else ldb.ERR_NO_SUCH_ATTRIBUTE
         message = ldb.Message()
@@ -369,47 +353,6 @@ class SambaGroupIO:
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
                 raise logic.SambaGroupError("group '%s' vanished before its membership could be changed" % group_dn)
             raise
-
-    def _modify(self, message, dn):
-        """Apply an LDB modify, mapping a vanished object to a clear error."""
-        ldb = samba_user_io.load_ldb()
-        try:
-            self.samdb.modify(message)
-        except ldb.LdbError as err:
-            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                raise logic.SambaGroupError("group '%s' vanished before it could be modified" % dn)
-            raise
-
-    def _desired_parent(self, path):
-        """Return the desired parent DN (path, or the default Users container)."""
-        if path is None:
-            return samba_user_io.default_users_dn(self.samdb)
-        try:
-            return samba_user_io.parse_dn(self.samdb, path)
-        except ValueError:
-            raise logic.SambaGroupError("path '%s' is not a valid distinguished name" % path)
-
-    def parent_exists(self, path):
-        """Return True if the desired parent container exists."""
-        return samba_user_io.dn_exists(self.samdb, self._desired_parent(path))
-
-    def needs_move(self, current_dn, path):
-        """Return True if the object's parent differs from the desired location."""
-        return not samba_user_io.same_parent(self.samdb, current_dn, self._desired_parent(path))
-
-    def move(self, current_dn, path):
-        """Move (rename) the group under the desired parent, preserving its RDN."""
-        ldb = samba_user_io.load_ldb()
-        target = samba_user_io.reparent_dn(self.samdb, current_dn, self._desired_parent(path))
-        try:
-            self.samdb.rename(samba_user_io.parse_dn(self.samdb, current_dn), target)
-        except ldb.LdbError as err:
-            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                raise logic.SambaGroupError("group vanished before it could be moved")
-            if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
-                raise logic.SambaGroupError("an object already exists at the target location")
-            raise
-        return str(target)
 
 
 def main():

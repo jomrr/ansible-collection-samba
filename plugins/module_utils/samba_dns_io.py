@@ -19,7 +19,7 @@ import importlib
 import time
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 
 #: Record types this module builds/extracts (the eight managed types).
 _MANAGED_TYPES = ["A", "AAAA", "CNAME", "PTR", "NS", "MX", "SRV", "TXT"]
@@ -149,10 +149,10 @@ def bump_soa_serial(samdb, zone_dn):
     the new ones in one modify, so an SOA rewritten concurrently fails with
     ERR_NO_SUCH_ATTRIBUTE and is re-read instead of overwritten.
     """
-    ldb = samba_user_io.load_ldb()
+    ldb = samba_ldb.load_ldb()
     ndr = load_ndr()
     dnsp = load_dnsp()
-    apex_dn = samba_user_io.build_child_dn(samdb, "DC", "@", zone_dn)
+    apex_dn = samba_ldb.build_child_dn(samdb, "DC", "@", zone_dn)
     attempt = 0
     while True:
         res = samdb.search(base=apex_dn, scope=ldb.SCOPE_BASE, attrs=["dnsRecord"])
@@ -185,7 +185,7 @@ def find_zone_dn(samdb, zone):
     search filter. The phantom-root control reaches the separate DNS application
     partitions (DomainDnsZones/ForestDnsZones).
     """
-    ldb = samba_user_io.load_ldb()
+    ldb = samba_ldb.load_ldb()
     res = samdb.search(
         base="",
         scope=ldb.SCOPE_SUBTREE,
@@ -204,7 +204,7 @@ def list_zone_entries(samdb, zone=None):
     phantom-root control reaches the DomainDnsZones/ForestDnsZones application
     partitions - the same search ``find_zone_dn`` uses.
     """
-    ldb = samba_user_io.load_ldb()
+    ldb = samba_ldb.load_ldb()
     if zone is None:
         expression = "(objectClass=dnsZone)"
     else:
@@ -216,7 +216,7 @@ def list_zone_entries(samdb, zone=None):
         attrs=["name"],
         controls=["search_options:0:2"],
     )
-    return [(samba_user_io.first_value(message, "name"), message.dn) for message in res]
+    return [(samba_ldb.first_value(message, "name"), message.dn) for message in res]
 
 
 def read_node_specs(samdb, node_dn):
@@ -225,7 +225,7 @@ def read_node_specs(samdb, node_dn):
     A tombstoned node (see :data:`LIVE_NODE_FILTER`) counts as absent, exactly
     as the DNS server sees it.
     """
-    ldb = samba_user_io.load_ldb()
+    ldb = samba_ldb.load_ldb()
     try:
         res = samdb.search(base=node_dn, scope=ldb.SCOPE_BASE, expression=LIVE_NODE_FILTER, attrs=["dnsRecord"])
     except ldb.LdbError as err:
@@ -243,7 +243,7 @@ def read_name_specs(samdb, zone_dn, name):
     The ``name`` is placed via ``ldb.Dn.set_component`` (in build_child_dn), so DN
     metacharacters cannot inject extra components.
     """
-    node_dn = samba_user_io.build_child_dn(samdb, "DC", name, zone_dn)
+    node_dn = samba_ldb.build_child_dn(samdb, "DC", name, zone_dn)
     return read_node_specs(samdb, node_dn)
 
 
@@ -253,7 +253,7 @@ def enumerate_zone_specs(samdb, zone_dn):
     ``name`` is the record's name relative to the zone (``@`` for the apex,
     dotted for nested nodes like ``_ldap._tcp``).
     """
-    ldb = samba_user_io.load_ldb()
+    ldb = samba_ldb.load_ldb()
     res = samdb.search(
         base=zone_dn,
         scope=ldb.SCOPE_SUBTREE,
@@ -284,7 +284,7 @@ def _specs_from_element(element):
 
 def _relative_name(samdb, node_dn, zone_dn):
     """Return a dnsNode's DNS name relative to its zone (deepest label first)."""
-    ldb = samba_user_io.load_ldb()
+    ldb = samba_ldb.load_ldb()
     relative = ldb.Dn(samdb, str(node_dn))
     relative.remove_base_components(len(zone_dn))
     labels = []

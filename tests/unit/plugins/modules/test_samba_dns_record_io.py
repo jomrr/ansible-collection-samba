@@ -16,7 +16,7 @@ import pytest
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_dns_record
 
 #: The real helper, captured before the autouse fixture stubs it for the IO tests.
@@ -176,7 +176,7 @@ class SerialStub:
 
 @pytest.fixture(autouse=True)
 def _patch_bindings(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     monkeypatch.setattr(samba_dns_io, "load_ndr", lambda: FakeNdr)
     monkeypatch.setattr(samba_dns_io, "load_dnsp", lambda: FakeDnsp)
 

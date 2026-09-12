@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_user
@@ -106,10 +107,18 @@ class FakeSamDB:
         self.deleted.append(dn)
 
 
+_FAKE = {}
+
+
+@pytest.fixture(autouse=True)
+def _patch_ldb(monkeypatch):
+    """Route the shared lazy ``ldb`` import to the fake ``make_io`` registers."""
+    monkeypatch.setattr(samba_ldb, "load_ldb", lambda: _FAKE["ldb"])
+
+
 def make_io(fake_ldb, samdb):
-    user_io = samba_user.SambaUserIO(samdb)
-    user_io._ldb = lambda: fake_ldb
-    return user_io
+    _FAKE["ldb"] = fake_ldb
+    return samba_user.SambaUserIO(samdb)
 
 
 def test_read_current_escapes_filter_value():
@@ -181,16 +190,16 @@ def test_set_enabled_vanished_raises_clean():
         make_io(fake_ldb, samdb).set_enabled("CN=jdoe,DC=example,DC=com", 512, False)
 
 
-def test_delete_user_already_gone_returns_false():
+def test_delete_already_gone_returns_false():
     fake_ldb = FakeLdb()
     samdb = FakeSamDB(delete_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
-    assert make_io(fake_ldb, samdb).delete_user("CN=jdoe,DC=example,DC=com") is False
+    assert make_io(fake_ldb, samdb).delete("CN=jdoe,DC=example,DC=com") is False
 
 
-def test_delete_user_success_returns_true():
+def test_delete_success_returns_true():
     fake_ldb = FakeLdb()
     samdb = FakeSamDB()
-    assert make_io(fake_ldb, samdb).delete_user("CN=jdoe,DC=example,DC=com") is True
+    assert make_io(fake_ldb, samdb).delete("CN=jdoe,DC=example,DC=com") is True
     assert samdb.deleted  # delete actually issued
 
 
@@ -287,13 +296,13 @@ class ExistsSamDB:
 
 
 def test_rfc2307_provisioned_true(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = ExistsSamDB(exists=True)
-    assert samba_user_io.rfc2307_provisioned(samdb) is True
+    assert samba_ldb.rfc2307_provisioned(samdb) is True
     # Probed the well-known fake-ypserver container with a base-scope search.
     assert samdb.searched and samdb.searched[0][1] == FakeLdb.SCOPE_BASE
 
 
 def test_rfc2307_provisioned_false(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
-    assert samba_user_io.rfc2307_provisioned(ExistsSamDB(exists=False)) is False
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
+    assert samba_ldb.rfc2307_provisioned(ExistsSamDB(exists=False)) is False

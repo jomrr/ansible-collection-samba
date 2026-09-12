@@ -266,7 +266,7 @@ def _undo_create(io, name, exc):
     if current is None:
         raise SambaGroupError("creating group '%s' failed: %s" % (name, exc))
     try:
-        io.delete_group(current["_dn"])
+        io.delete(current["_dn"])
     except Exception as undo_exc:
         raise SambaGroupError(
             "creating group '%s' failed: %s; removing the partially created object failed too: %s"
@@ -283,7 +283,7 @@ def run(params, check_mode, io):
     ``io`` provides ``read_current``, ``rfc2307_provisioned``,
     ``resolve_member``, ``create_group``, ``set_description``,
     ``set_group_type``, ``set_gid_number``, ``add_member``, ``remove_member``,
-    ``delete_group`` and the move helpers ``needs_move``, ``parent_exists`` and
+    ``delete`` and the move helpers ``needs_move``, ``parent_exists`` and
     ``move``. Injecting it keeps this function testable without the bindings.
     """
     name = params["name"]
@@ -351,7 +351,7 @@ def run(params, check_mode, io):
         return result
 
     if planned["action"] == "delete":
-        deleted = io.delete_group(current["_dn"])
+        deleted = io.delete(current["_dn"])
         if not deleted:
             # Removed concurrently between read and write; absent already holds.
             result["changed"] = False

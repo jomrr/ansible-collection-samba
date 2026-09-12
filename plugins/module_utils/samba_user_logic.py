@@ -206,7 +206,7 @@ def _undo_create(io, username, exc):
     if current is None:
         raise SambaUserError("creating user '%s' failed: %s" % (username, exc))
     try:
-        io.delete_user(current["_dn"])
+        io.delete(current["_dn"])
     except Exception as undo_exc:
         raise SambaUserError(
             "creating user '%s' failed: %s; removing the partially created object failed too: %s"
@@ -221,7 +221,7 @@ def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
     ``io`` provides ``read_current``, ``rfc2307_provisioned``, ``create_user``,
-    ``apply_attrs``, ``set_enabled``, ``set_password``, ``delete_user`` and the
+    ``apply_attrs``, ``set_enabled``, ``set_password``, ``delete`` and the
     move helpers ``needs_move``, ``parent_exists`` and ``move``. Injecting it
     keeps this function testable without the samba bindings.
     """
@@ -297,7 +297,7 @@ def run(params, check_mode, io):
         return result
 
     if planned["action"] == "delete":
-        deleted = io.delete_user(current["_dn"])
+        deleted = io.delete(current["_dn"])
         if not deleted:
             # The object was removed concurrently between read and write; the
             # desired state (absent) already holds, so this is a no-op.

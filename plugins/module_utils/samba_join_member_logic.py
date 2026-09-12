@@ -16,6 +16,8 @@ unit-testable without the bindings.
 
 from __future__ import annotations
 
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_lifecycle_logic as lifecycle
+
 
 class SambaJoinMemberError(Exception):
     """User-facing error the module turns into ``fail_json``."""
@@ -32,17 +34,9 @@ def run(params, check_mode, io):
     ``state`` is always ``present``. The cases:
       * already a member and not ``force`` -> idempotent no-op; never re-join.
       * not a member, or ``force`` -> join (a real change).
+    The decision is the shared :func:`samba_lifecycle_logic.ensure`.
     """
-    current = io.read_state()
-
-    if current is not None and not params.get("force"):
-        return {"changed": False, "joined": True, "domain": current}
-
-    if not params.get("bind_password"):
-        raise SambaJoinMemberError("bind_password is required to join a domain")
-
-    if check_mode:
-        return {"changed": True, "joined": current is not None, "domain": current}
-
-    domain = io.join(params)
-    return {"changed": True, "joined": True, "domain": domain}
+    return lifecycle.ensure(
+        io.read_state(), params, check_mode, io.join, SambaJoinMemberError,
+        flag="joined", secret="bind_password", action="join a domain",
+    )

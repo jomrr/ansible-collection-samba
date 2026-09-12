@@ -293,36 +293,32 @@ user:
       sample: true
 """
 
-import importlib
 import traceback
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
 
 
-class SambaUserIO:
+class SambaUserIO(samba_ldb.SambaObjectIO):
     """LDB read/write operations for users.
 
-    All ``samba``/``ldb`` imports are performed lazily inside the methods via
-    :func:`importlib.import_module`, so importing this module never requires the
-    bindings (keeping the static sanity phase green).
+    The shared modify, delete and move operations come from
+    :class:`samba_ldb.SambaObjectIO`. The ``samba``/``ldb`` bindings are
+    imported lazily (via ``samba_ldb.load_ldb``), so importing this module never
+    requires them (keeping the static sanity phase green).
     """
 
-    def __init__(self, samdb):
-        self.samdb = samdb
-
-    @staticmethod
-    def _ldb():
-        """Import and return the ``ldb`` module lazily."""
-        return importlib.import_module("ldb")
+    error_cls = logic.SambaUserError
+    noun = "user"
 
     def read_current(self, username):
         """Return the normalized current state of ``username`` or ``None``."""
-        ldb = self._ldb()
+        ldb = samba_ldb.load_ldb()
         # objectCategory=person keeps computer accounts (also objectClass=user)
         # out, the same match samba_user_info uses.
         expression = "(&(objectCategory=person)(objectClass=user)(sAMAccountName=%s))" % ldb.binary_encode(username)
@@ -342,7 +338,7 @@ class SambaUserIO:
         A concurrent creation (the object already exists at write time) is
         turned into a clear error instead of a raw traceback.
         """
-        ldb = self._ldb()
+        ldb = samba_ldb.load_ldb()
         try:
             self.samdb.newuser(username, password)
         except ldb.LdbError as err:
@@ -360,7 +356,7 @@ class SambaUserIO:
         empty string). Fails cleanly if the object was removed (concurrent
         delete) before the modify reached the DC.
         """
-        ldb = self._ldb()
+        ldb = samba_ldb.load_ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
         replaced = False
@@ -379,7 +375,7 @@ class SambaUserIO:
 
     def _clear_attr(self, dn, ldap_attr):
         """Remove an attribute; one that is already gone is an idempotent no-op."""
-        ldb = self._ldb()
+        ldb = samba_ldb.load_ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
         message[ldap_attr] = ldb.MessageElement([], ldb.FLAG_MOD_DELETE, ldap_attr)
@@ -389,17 +385,13 @@ class SambaUserIO:
             if err.args[0] != ldb.ERR_NO_SUCH_ATTRIBUTE:
                 raise
 
-    def rfc2307_provisioned(self):
-        """True if the domain was provisioned with C(--use-rfc2307)."""
-        return samba_user_io.rfc2307_provisioned(self.samdb)
-
     def set_enabled(self, dn, current_uac, enabled):
         """Toggle the ACCOUNTDISABLE bit of ``userAccountControl``.
 
         Fails cleanly if the object was removed (concurrent delete) before the
         modify reached the DC.
         """
-        ldb = self._ldb()
+        ldb = samba_ldb.load_ldb()
         if enabled:
             new_uac = current_uac & ~logic.UAC_ACCOUNTDISABLE
         else:
@@ -411,33 +403,6 @@ class SambaUserIO:
         )
         self._modify(message, dn)
 
-    def _modify(self, message, dn):
-        """Apply an LDB modify, mapping a vanished object to a clear error."""
-        ldb = self._ldb()
-        try:
-            self.samdb.modify(message)
-        except ldb.LdbError as err:
-            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                raise logic.SambaUserError(
-                    "user '%s' vanished before it could be modified" % dn
-                )
-            raise
-
-    def delete_user(self, dn):
-        """Delete the user object by DN.
-
-        Returns ``True`` if it was deleted, ``False`` if it was already gone
-        (concurrent delete) - which is an idempotent no-op, not an error.
-        """
-        ldb = self._ldb()
-        try:
-            self.samdb.delete(ldb.Dn(self.samdb, dn))
-            return True
-        except ldb.LdbError as err:
-            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                return False
-            raise
-
     def set_password(self, dn, password):
         """Set the password of an existing user.
 
@@ -448,7 +413,7 @@ class SambaUserIO:
         of as tracebacks (``setpassword`` itself raises a plain Exception for
         a missing user). The password never appears in a message.
         """
-        ldb = self._ldb()
+        ldb = samba_ldb.load_ldb()
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
         message["unicodePwd"] = ldb.MessageElement(
@@ -462,37 +427,6 @@ class SambaUserIO:
                     "the domain password policy rejected the new password for '%s'" % dn
                 )
             raise
-
-    def _desired_parent(self, path):
-        """Return the desired parent DN (path, or the default Users container)."""
-        if path is None:
-            return samba_user_io.default_users_dn(self.samdb)
-        try:
-            return samba_user_io.parse_dn(self.samdb, path)
-        except ValueError:
-            raise logic.SambaUserError("path '%s' is not a valid distinguished name" % path)
-
-    def parent_exists(self, path):
-        """Return True if the desired parent container exists."""
-        return samba_user_io.dn_exists(self.samdb, self._desired_parent(path))
-
-    def needs_move(self, current_dn, path):
-        """Return True if the object's parent differs from the desired location."""
-        return not samba_user_io.same_parent(self.samdb, current_dn, self._desired_parent(path))
-
-    def move(self, current_dn, path):
-        """Move (rename) the object under the desired parent, preserving its RDN."""
-        ldb = samba_user_io.load_ldb()
-        target = samba_user_io.reparent_dn(self.samdb, current_dn, self._desired_parent(path))
-        try:
-            self.samdb.rename(samba_user_io.parse_dn(self.samdb, current_dn), target)
-        except ldb.LdbError as err:
-            if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                raise logic.SambaUserError("user vanished before it could be moved")
-            if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
-                raise logic.SambaUserError("an object already exists at the target location")
-            raise
-        return str(target)
 
 
 def main():

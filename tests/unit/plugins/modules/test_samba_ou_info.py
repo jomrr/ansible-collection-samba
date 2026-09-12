@@ -13,7 +13,7 @@ import pytest
 from ansible.module_utils import basic
 from ansible.module_utils.testing import patch_module_args
 
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_ou_info
 
 
@@ -95,7 +95,7 @@ def test_query_escapes_filter_value(monkeypatch):
     # The attacker-controlled name must go through the escaper, and the filter
     # must carry the escaped form rather than the raw injection.
     fake_ldb = FakeLdb()
-    monkeypatch.setattr(samba_user_io, "load_ldb", lambda: fake_ldb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", lambda: fake_ldb)
     samdb = FakeSamDB(result=[])
     samba_ou_info.query(samdb, "evil)(uid=*)", "DC=example,DC=com")
     assert "evil)(uid=*)" in fake_ldb.encoded
@@ -105,7 +105,7 @@ def test_query_escapes_filter_value(monkeypatch):
 
 
 def test_query_single_existing(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(result=[ou_msg("OU=Staff,DC=example,DC=com", description="All staff")])
     ous = samba_ou_info.query(samdb, "Staff", "DC=example,DC=com")
     assert len(ous) == 1
@@ -117,20 +117,20 @@ def test_query_single_existing(monkeypatch):
 
 
 def test_query_single_missing_is_empty(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     assert samba_ou_info.query(FakeSamDB(result=[]), "ghost", "DC=example,DC=com") == []
 
 
 def test_query_missing_base_is_empty(monkeypatch):
     # A non-existent search base raises NO_SUCH_OBJECT, reported as no matches.
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(search_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
     assert samba_ou_info.query(samdb, "x", "OU=Missing,DC=example,DC=com") == []
 
 
 def test_query_all_ous_returns_list(monkeypatch):
     fake_ldb = FakeLdb()
-    monkeypatch.setattr(samba_user_io, "load_ldb", lambda: fake_ldb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", lambda: fake_ldb)
     samdb = FakeSamDB(result=[
         ou_msg("OU=a,DC=example,DC=com"),
         ou_msg("OU=b,OU=a,DC=example,DC=com"),
@@ -146,7 +146,7 @@ def test_query_all_ous_returns_list(monkeypatch):
 
 
 def test_query_all_under_explicit_path(monkeypatch):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     samdb = FakeSamDB(result=[])
     samba_ou_info.query(samdb, None, "OU=Staff,DC=example,DC=com")
     assert samdb.captured["base"] == "OU=Staff,DC=example,DC=com"
@@ -162,7 +162,7 @@ def _exit_json(*args, **kwargs):
 
 
 def _run_main(monkeypatch, check_mode):
-    monkeypatch.setattr(samba_user_io, "load_ldb", FakeLdb)
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     monkeypatch.setattr(
         samba_ou_info, "connect_samdb",
         lambda module: FakeSamDB(result=[ou_msg("OU=Staff,DC=example,DC=com", description="All staff")]),
