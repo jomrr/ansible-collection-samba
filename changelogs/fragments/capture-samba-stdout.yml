@@ -1,8 +1,0 @@
----
-bugfixes:
-  - >-
-    samba_join_dc, samba_provision - what samba's join and provision print
-    while they run inside the module process is captured instead of reaching
-    the module's stdout, where Ansible expects only the JSON result and merely
-    tolerates other lines. The lines are returned as C(output), and the last of
-    them are quoted in the error when the operation fails.

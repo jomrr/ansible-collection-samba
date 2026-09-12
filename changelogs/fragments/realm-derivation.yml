@@ -1,8 +1,0 @@
----
-bugfixes:
-  - >-
-    all object and info modules (shared connection) - when C(realm) is omitted
-    it is derived only from a fully qualified C(server) name. A bare host name
-    or an IP address now fails before any connection with a message asking for
-    C(realm), instead of guessing a realm such as C(DC1) or C(0.2.10) and
-    failing later with a cryptic Kerberos error.

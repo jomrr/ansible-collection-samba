@@ -1,8 +1,0 @@
----
-trivial:
-  - >-
-    Internal restructuring only, no behaviour change - the generic LDB and DN
-    helpers moved from samba_user_io to the new samba_ldb module_utils, the
-    modify/delete/move I/O shared by samba_user and samba_group lives once in
-    samba_ldb.SambaObjectIO, and the binary decision of samba_provision and the
-    join modules lives once in samba_lifecycle_logic.

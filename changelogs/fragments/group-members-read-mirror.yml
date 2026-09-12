@@ -1,7 +1,0 @@
----
-minor_changes:
-  - >-
-    samba_group - C(members) accepts distinguished names as well as
-    sAMAccountNames, so the member DNs C(samba_group_info) returns can be fed
-    back unchanged (the read mirror the DNS modules already offer). A DN is
-    checked to exist and taken in the directory's own spelling.

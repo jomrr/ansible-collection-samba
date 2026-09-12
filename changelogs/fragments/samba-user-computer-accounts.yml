@@ -1,8 +1,0 @@
----
-bugfixes:
-  - >-
-    samba_user - the lookup matched any object with objectClass user, so a
-    username naming a computer account (for example DC1$) would have been
-    managed or, with state=absent, deleted. The module now matches user
-    accounts only (objectCategory person), consistent with samba_user_info;
-    computer accounts are never touched.

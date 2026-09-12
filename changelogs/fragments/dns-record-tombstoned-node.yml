@@ -1,9 +1,0 @@
----
-bugfixes:
-  - >-
-    samba_dns_record - re-adding a record at a name whose last record had been
-    removed left the dnsNode tombstoned (dNSTombstoned=TRUE), so the DNS server
-    never answered the name while the module reported it present. The node is
-    now revived (records replaced, flag cleared) and the read path treats
-    tombstoned nodes as absent, matching samba_dns_record_info and the DNS
-    server.

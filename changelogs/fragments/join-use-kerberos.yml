@@ -1,9 +1,0 @@
----
-breaking_changes:
-  - >-
-    samba_join_dc, samba_join_member - the join now requires Kerberos by
-    default and fails rather than falling back to NTLM, the same stance as the
-    object modules. Previously the policy came from smb.conf (usually
-    C(desired)), so a join could silently authenticate with NTLM. The new
-    option C(use_kerberos) restores that fallback with C(desired) for hosts
-    whose Kerberos client setup is not complete at join time.

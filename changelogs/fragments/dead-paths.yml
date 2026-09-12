@@ -1,8 +1,0 @@
----
-trivial:
-  - >-
-    Internal cleanup, no behaviour change - unreachable re-raise branches
-    around the provision and join library calls removed, the impossible bytes
-    branch in the DNS node name helper dropped, the 16-bit range validator
-    named for what it validates, and the DN-only projection in the group
-    member lookup explained.

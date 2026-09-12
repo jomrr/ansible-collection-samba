@@ -1,7 +1,0 @@
----
-bugfixes:
-  - >-
-    samba_user, samba_group, samba_ou - check mode now validates the target
-    location (C(path) parses, the parent container exists) before it reports
-    anything, so a dry run fails exactly where the real run would instead of
-    claiming a change for a create or move the real run then refuses.

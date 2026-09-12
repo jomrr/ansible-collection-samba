@@ -1,9 +1,0 @@
----
-bugfixes:
-  - >-
-    samba_dns_record - C(state=absent) deleted the record by rewriting the whole
-    dnsRecord attribute from a snapshot, so a record added on the same name
-    between the read and the write was lost. Now only the exact stored value is
-    deleted; when it was the last live record the node is tombstoned in the same
-    modify (the state samba itself leaves behind for its garbage collection). A
-    value that vanished meanwhile is re-read and treated as already absent.
