@@ -18,7 +18,7 @@
       # python3-cryptography is the unversioned name zypper resolves to the
       # current default python flavor; a versioned python3XX-cryptography goes
       # stale whenever Tumbleweed switches its default interpreter.
-      Suse: [samba-ad-dc, samba-tool, samba-dsdb-modules, samba-client, samba-python3, python3-cryptography, krb5-client, krb5-server, samba-winbind]
+      Suse: [samba-ad-dc, samba-tool, samba-dsdb-modules, samba-client, samba-python3, python3-cryptography, krb5-client, krb5-server, samba-winbind, ldb-tools]
     samba_fqdn: "{{ inventory_hostname }}.{{ samba_realm | lower }}"
   module_defaults:
     group/jomrr.samba.all:

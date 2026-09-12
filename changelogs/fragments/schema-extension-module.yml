@@ -1,0 +1,9 @@
+---
+minor_changes:
+  - >-
+    New module samba_schema_extension to add a known schema extension to a
+    Samba AD domain on the schema master, from a catalog of published
+    definitions - C(laps) (the Windows LAPS attributes, property set and their
+    place on the computer class), C(sshpublickey) (OpenSSH public keys on user
+    accounts) and C(ldapcompat) (entryUUID/nsUniqueId) - completing a partly
+    present extension and never removing schema.

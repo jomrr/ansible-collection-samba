@@ -7,8 +7,9 @@ native `samba` Python bindings (`samba.samdb.SamDB`, `samba.join`,
 - **Object management** on a running DC — users, groups, organizational units,
   the domain password policy and fine-grained password settings, and the Samba
   internal DNS.
-- **Domain lifecycle** — provisioning a new domain controller and joining a host
-  to an existing domain (as a DC, a Samba member server, or an SSSD client).
+- **Domain lifecycle** — provisioning a new domain controller, joining a host
+  to an existing domain (as a DC, a Samba member server, or an SSSD client),
+  and extending the schema (Windows LAPS, OpenSSH public keys, LDAP compat).
 
 Every module is idempotent and supports check mode: the object modules diff the
 current against the desired state, while the lifecycle modules use a binary
@@ -52,6 +53,7 @@ binary.
 | `samba_join_dc` | Join an existing domain as an additional DC | yes (binary) | yes |
 | `samba_join_member` | Join an existing domain as a Samba member server (winbind) | yes (binary) | yes |
 | `samba_join_sssd` | Join an existing domain for SSSD (writes a Kerberos keytab) | yes (binary) | yes |
+| `samba_schema_extension` | Extend the schema on the schema master (LAPS, OpenSSH public keys, LDAP compat) | yes | yes |
 
 The three join modules are split **by join mechanism and the artifact each
 writes**, not by the host's intended purpose:
@@ -172,6 +174,8 @@ group. The options they share with the object modules by name (`server`,
 existing DC to join against and the admin credentials to authorize the join —
 not a connection to manage objects on. `samba_provision` takes no `server`/bind
 options at all (there is no DC yet); it provisions the domain locally.
+`samba_schema_extension` is local in the same way: it writes the schema master's
+own `sam.ldb` (run it on that DC) and refuses any other DC.
 
 ## Connection setup
 

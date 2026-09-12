@@ -558,3 +558,58 @@ Molecule scenario: the domain policy is tightened, a PSO with two subjects and
 one inheriting every setting are created, a seeded PSO is removed, and
 `samba-tool domain passwordsettings show` / `pso show` confirm what the modules
 wrote.
+
+---
+
+## Schema extensions (samba_schema_extension)
+
+### Context
+
+Sites extend the AD schema for Windows LAPS, OpenSSH public keys (the
+openssh-lpk `sshPublicKey`/`ldapPublicKey` pair) and LDAP compatibility
+(`entryUUID`/`nsUniqueId`). Schema changes are one way (the Samba wiki: "You
+may only add schema, but you can never remove it"), replicate forest-wide and
+must be made on the schema master; Samba refuses schema writes unless the
+writing process sets `dsdb:schema update allowed`. The maintainer had a static
+LAPS module and asked (2026-09-12) whether one generic module or specialised
+ones are more efficient and safer.
+
+### Decision
+
+- **One module, `samba_schema_extension`, with a catalog.** The mechanics are
+  the same for every extension (attributes, then classes, then links into
+  existing classes, plus extended rights), so the engine exists once; the
+  definitions live in `module_utils/samba_schema_catalog.py` as reviewed data
+  with their sources. Playbooks choose an extension by name; free-form schema
+  definitions from playbooks are deliberately not offered - a typo in an OID
+  or a syntax is permanent and forest-wide.
+- **Local on the schema master**, like the setup modules: `sam.ldb` by path,
+  system session, `dsdb:schema update allowed` on the module's own LoadParm
+  (what `ldbmodify --option=...` does), the default smb.conf. A DC that does
+  not hold the schema FSMO role is refused. Over LDAP the DC's own smb.conf
+  would have to allow schema updates and there would be no transactions.
+- **Phases with a reload between them**, each a local ldb transaction:
+  attributes and rights, then classes (which may contain the new attributes),
+  then links (which may name the new classes); `schemaUpdateNow` after each
+  applied phase, as the existing LAPS module did.
+- **Only ever extend.** Missing entries are added, `mayContain` and
+  `auxiliaryClass` only gain values, a differing property is set and one the
+  directory considers immutable (OID, syntax, schemaIDGUID) is left to the
+  directory to refuse, reported as is. No `state: absent`.
+- **Catalog:** `laps` from Microsoft's LAPS technical reference and [MS-ADA2]
+  (OIDs, syntaxes, searchFlags 904, the `f3531ec6-...` property set, the
+  computer class link); `sshpublickey` and `ldapcompat` from the Samba wiki's
+  LDIFs including their fixed schemaIDGUIDs. The wiki links `ldapPublicKey` to
+  nothing; the catalog links it to `user` as an auxiliary class, otherwise no
+  account could carry a key. Microsoft publishes no fixed schemaIDGUIDs for
+  the LAPS attributes (checked: technical reference, [MS-ADA2], the Samba
+  community LDIF), so the directory assigns them; the property set GUID, which
+  LAPS delegation uses, is the published one. Should a source for the
+  Windows-assigned GUIDs turn up, they are a catalog change.
+
+### Status
+
+Implemented with unit tests (planner, catalog consistency, I/O) and covered in
+the default Molecule scenario: all three extensions applied on the single DC,
+idempotent on the re-run, `ldbsearch` confirms the entries and a user takes an
+`sshPublicKey` through the extended `user` class.

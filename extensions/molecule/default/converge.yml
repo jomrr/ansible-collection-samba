@@ -528,3 +528,16 @@
       jomrr.samba.samba_password_settings:
         name: ghost_pso
         state: absent
+
+    # --- schema extensions: local on the schema master (this single DC) ---
+    - name: Converge | Extend the schema for Windows LAPS
+      jomrr.samba.samba_schema_extension:
+        extension: laps
+
+    - name: Converge | Extend the schema for OpenSSH public keys on user accounts
+      jomrr.samba.samba_schema_extension:
+        extension: sshpublickey
+
+    - name: Converge | Extend the schema for LDAP compatibility (entryUUID)
+      jomrr.samba.samba_schema_extension:
+        extension: ldapcompat

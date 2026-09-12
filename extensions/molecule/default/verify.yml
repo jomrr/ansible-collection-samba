@@ -620,3 +620,63 @@
       register: _pso_gone
       changed_when: false
       failed_when: _pso_gone.rc == 0
+
+    # --- schema extensions: the directory's own view, then a functional check ---
+    - name: Verify | Read the extended schema back
+      ansible.builtin.command:
+        argv:
+          - ldbsearch
+          - -H
+          - /var/lib/samba/private/sam.ldb
+          - -b
+          - "CN=Schema,CN=Configuration,{{ samba_base_dn }}"
+          - "(|(lDAPDisplayName=msLAPS-Password)(lDAPDisplayName=computer)(lDAPDisplayName=user)(lDAPDisplayName=ldapCompatPerson))"
+          - lDAPDisplayName
+          - searchFlags
+          - mayContain
+          - auxiliaryClass
+      register: _schema
+      changed_when: false
+
+    - name: Verify | The extensions are in the schema as specified
+      ansible.builtin.assert:
+        that:
+          - "'searchFlags: 904' in _schema.stdout"
+          - "'mayContain: msLAPS-CurrentPasswordVersion' in _schema.stdout"
+          - "'auxiliaryClass: ldapPublicKey' in _schema.stdout"
+          - "'lDAPDisplayName: ldapCompatPerson' in _schema.stdout"
+
+    - name: Verify | Prepare an LDIF that stores an OpenSSH public key on a user
+      ansible.builtin.copy:
+        dest: /root/sshkey.ldif
+        mode: "0600"
+        content: |
+          dn: CN=jane,CN=Users,{{ samba_base_dn }}
+          changetype: modify
+          add: sshPublicKey
+          sshPublicKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHRlc3Qta2V5LWZvci1tb2xlY3VsZS1vbmx5 jane@example.com
+
+    - name: Verify | The extended schema is live (a user takes an sshPublicKey)
+      ansible.builtin.command:
+        argv:
+          - ldbmodify
+          - -H
+          - /var/lib/samba/private/sam.ldb
+          - /root/sshkey.ldif
+      changed_when: true
+
+    - name: Verify | Read the key back from the user
+      ansible.builtin.command:
+        argv:
+          - ldbsearch
+          - -H
+          - /var/lib/samba/private/sam.ldb
+          - "(sAMAccountName=jane)"
+          - sshPublicKey
+      register: _jane_key
+      changed_when: false
+
+    - name: Verify | The key is stored on the user
+      ansible.builtin.assert:
+        that:
+          - "'sshPublicKey: ssh-ed25519' in _jane_key.stdout"
