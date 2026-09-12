@@ -14,7 +14,7 @@ COLLECTIONS_ROOT := $(CURDIR)/../../..
 
 .DEFAULT_GOAL := help
 
-.PHONY: help lint sanity units test molecule molecule-provision molecule-join-dc molecule-join-member molecule-join-sssd build changelog promote release release-dry galaxy docs docs-clean clean
+.PHONY: help lint sanity units test molecule molecule-provision molecule-join-dc molecule-join-member molecule-join-sssd build promote release release-dry galaxy docs docs-clean clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -49,9 +49,6 @@ molecule-join-sssd: ## Run the samba_join_sssd multi-host Molecule scenario (fou
 build: ## Build the collection tarball into dist/ (overwrites existing)
 	ansible-galaxy collection build --output-path dist/ --force
 
-changelog: ## Generate the Galaxy changelog from fragments (antsibull-changelog)
-	antsibull-changelog release
-
 docs: ## Build the Sphinx HTML docsite into docs/build/html (antsibull-docs)
 	ANSIBLE_COLLECTIONS_PATH=$(COLLECTIONS_ROOT) bash docs/build.sh
 
@@ -72,8 +69,9 @@ promote: ## Merge dev into main, push, and return to dev
 
 # Requires GH_TOKEN in the environment. PSR only releases from the main/master
 # group, so the target checks out main itself (promote leaves the tree on dev).
-# PSR bumps galaxy.yml, builds, tags and creates the GitHub release;
-# CHANGELOG.rst stays antsibull-changelog's. The release commit lands on main
+# PSR bumps galaxy.yml, cuts the antsibull changelog and builds the tarball
+# (build_command in pyproject.toml), commits, tags and creates the GitHub
+# release. The release commit lands on main
 # only, so dev is fast-forwarded to main afterwards; otherwise the next
 # `make promote` cannot fast-forward. Right after a promote dev has no commits
 # of its own, so --ff-only succeeds; if work continued on dev meanwhile it

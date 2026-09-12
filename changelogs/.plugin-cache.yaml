@@ -10,10 +10,96 @@ plugins:
   httpapi: {}
   inventory: {}
   lookup: {}
-  module: {}
+  module:
+    samba_dns_record:
+      description: Manage DNS records in a Samba AD DC
+      name: samba_dns_record
+      namespace: ''
+      version_added: 0.1.0
+    samba_dns_record_info:
+      description: Query DNS records from a Samba AD DC
+      name: samba_dns_record_info
+      namespace: ''
+      version_added: 0.1.0
+    samba_dns_zone:
+      description: Manage DNS zones in a Samba AD DC
+      name: samba_dns_zone
+      namespace: ''
+      version_added: 0.1.0
+    samba_dns_zone_info:
+      description: Query DNS zones from a Samba AD DC
+      name: samba_dns_zone_info
+      namespace: ''
+      version_added: 0.1.0
+    samba_group:
+      description: Manage groups in a Samba AD DC
+      name: samba_group
+      namespace: ''
+      version_added: 0.1.0
+    samba_group_info:
+      description: Query groups from a Samba AD DC
+      name: samba_group_info
+      namespace: ''
+      version_added: 0.1.0
+    samba_join_dc:
+      description: Join a host to an existing domain as an additional Samba AD DC
+      name: samba_join_dc
+      namespace: ''
+      version_added: 0.1.0
+    samba_join_member:
+      description: Join a host to an existing domain as a Samba AD member server
+      name: samba_join_member
+      namespace: ''
+      version_added: 0.1.0
+    samba_join_sssd:
+      description: Join a host to an existing domain via adcli for SSSD
+      name: samba_join_sssd
+      namespace: ''
+      version_added: 0.1.0
+    samba_ou:
+      description: Manage organizational units in a Samba AD DC
+      name: samba_ou
+      namespace: ''
+      version_added: 0.1.0
+    samba_ou_info:
+      description: Query organizational units from a Samba AD DC
+      name: samba_ou_info
+      namespace: ''
+      version_added: 0.1.0
+    samba_password_policy:
+      description: Manage the domain password policy of a Samba AD DC
+      name: samba_password_policy
+      namespace: ''
+      version_added: 2.0.0
+    samba_password_settings:
+      description: Manage fine-grained password settings objects (PSOs) in a Samba
+        AD DC
+      name: samba_password_settings
+      namespace: ''
+      version_added: 2.0.0
+    samba_provision:
+      description: Provision a Samba AD domain controller
+      name: samba_provision
+      namespace: ''
+      version_added: 0.1.0
+    samba_schema_extension:
+      description: Extend the schema of a Samba AD domain with a known extension
+      name: samba_schema_extension
+      namespace: ''
+      version_added: 2.0.0
+    samba_user:
+      description: Manage users in a Samba AD DC
+      name: samba_user
+      namespace: ''
+      version_added: 0.1.0
+    samba_user_info:
+      description: Query users from a Samba AD DC
+      name: samba_user_info
+      namespace: ''
+      version_added: 0.1.0
   netconf: {}
   shell: {}
   strategy: {}
   test: {}
   vars: {}
-version: 0.1.0
+version: 1.0.2
