@@ -43,8 +43,8 @@ def _ipv6_normalise(addr):
     return socket.inet_ntop(socket.AF_INET6, socket.inet_pton(socket.AF_INET6, addr))
 
 
-def _require_port_range(value, field):
-    """Validate that an unsigned 16-bit field is in range."""
+def _require_uint16(value, field):
+    """Validate that an unsigned 16-bit field (port, priority, weight, preference) is in range."""
     if value < 0 or value > _UINT16_MAX:
         raise SambaDnsRecordError("%s must be between 0 and %d" % (field, _UINT16_MAX))
 
@@ -77,11 +77,11 @@ def validate(params):
         except (OSError, ValueError):
             raise SambaDnsRecordError("value '%s' is not a valid IPv6 address" % value)
     elif rtype == "MX":
-        _require_port_range(params["preference"], "preference")
+        _require_uint16(params["preference"], "preference")
         spec["preference"] = params["preference"]
     elif rtype == "SRV":
         for field in ("priority", "weight", "port"):
-            _require_port_range(params[field], field)
+            _require_uint16(params[field], field)
             spec[field] = params[field]
 
     return spec

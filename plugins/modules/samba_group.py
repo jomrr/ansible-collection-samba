@@ -256,7 +256,13 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
         return samba_group_io.message_to_state(res[0])
 
     def resolve_member(self, name):
-        """Resolve a member's sAMAccountName to its DN; the name is escaped."""
+        """Resolve a member's sAMAccountName to its DN; the name is escaped.
+
+        Only the DN is needed and it comes with every result; the one attribute
+        requested is a projection that keeps the LDAP search from returning the
+        whole object, which an empty attribute list would (LDAP reads it as
+        "all user attributes").
+        """
         ldb = samba_ldb.load_ldb()
         expression = "(sAMAccountName=%s)" % ldb.binary_encode(name)
         res = self.samdb.search(

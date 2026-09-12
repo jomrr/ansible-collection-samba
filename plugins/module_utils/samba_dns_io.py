@@ -287,8 +287,4 @@ def _relative_name(samdb, node_dn, zone_dn):
     ldb = samba_ldb.load_ldb()
     relative = ldb.Dn(samdb, str(node_dn))
     relative.remove_base_components(len(zone_dn))
-    labels = []
-    for index in range(len(relative)):
-        value = relative.get_component_value(index)
-        labels.append(value.decode() if isinstance(value, bytes) else value)
-    return ".".join(labels)
+    return ".".join(relative.get_component_value(index) for index in range(len(relative)))

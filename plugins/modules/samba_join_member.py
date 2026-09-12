@@ -287,8 +287,6 @@ class SambaJoinMemberIO:
         net = net_s3.Net(creds, s3_lp, server=params["server"])
         try:
             sid, domain_name = net.join_member(netbios_name, machinepass=params["machinepass"])
-        except logic.SambaJoinMemberError:
-            raise
         except Exception as exc:
             raise logic.SambaJoinMemberError("joining the domain failed: %s" % to_native(exc))
 

@@ -271,8 +271,6 @@ class SambaJoinDcIO:
                     domain=params["domain"],
                     dns_backend=params["dns_backend"],
                 )
-        except logic.SambaJoinDcError:
-            raise
         except Exception as exc:
             raise logic.SambaJoinDcError(
                 "joining the domain failed: %s%s" % (to_native(exc), transcript.tail())

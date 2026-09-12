@@ -264,8 +264,6 @@ class SambaProvisionIO:
                     use_rfc2307=params["use_rfc2307"],
                     lp=load_parm,
                 )
-        except logic.SambaProvisionError:
-            raise
         except Exception as exc:
             raise logic.SambaProvisionError(
                 "provisioning the domain failed: %s%s" % (to_native(exc), transcript.tail())
