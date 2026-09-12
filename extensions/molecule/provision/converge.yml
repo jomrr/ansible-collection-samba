@@ -16,3 +16,12 @@
         dns_backend: SAMBA_INTERNAL
         use_rfc2307: true
         state: present
+      register: _provision
+
+    # provision() prints on its way; the module keeps that off its stdout (which
+    # carries the JSON result) and returns it on the run that provisioned. The
+    # idempotence re-run provisions nothing and returns no output.
+    - name: Converge | Provisioning returned what samba printed instead of printing it
+      ansible.builtin.assert:
+        that:
+          - (_provision is changed) == (_provision.output is defined)

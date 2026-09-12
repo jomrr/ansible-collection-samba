@@ -167,6 +167,17 @@ domain:
       returned: when the host is a DC
       type: str
       sample: S-1-5-21-1234567890-1234567890-1234567890
+output:
+  description:
+    - What samba printed while joining (its progress narration, one entry per
+      line). Captured so it cannot corrupt the module result, and returned for
+      diagnostics; when the join fails, its last lines are quoted in the error.
+  returned: when the host was joined in this run
+  type: list
+  elements: str
+  sample:
+    - "Adding CN=DC2,OU=Domain Controllers,DC=samdom,DC=example,DC=com"
+    - "Replicating critical objects from the base DN of the domain"
 """
 
 import importlib
@@ -198,6 +209,8 @@ class SambaJoinDcIO:
 
     def __init__(self, module):
         self.module = module
+        #: What samba printed during the join (None until a join ran).
+        self.output = None
 
     def read_state(self):
         """Return the local host's DC identity, or None if it is not a DC."""
@@ -213,7 +226,8 @@ class SambaJoinDcIO:
         samba only through the credentials object (never as an argv). A failure
         (wrong credentials, unreachable DC, non-empty private dir) is turned into
         a clear error instead of a raw traceback, and the join logger is silenced
-        so it cannot echo anything sensitive.
+        so it cannot echo anything sensitive. What samba prints during the join
+        is captured into ``output`` instead of reaching the module's stdout.
         """
         join_mod = importlib.import_module("samba.join")
         credentials = importlib.import_module("samba.credentials")
@@ -242,21 +256,28 @@ class SambaJoinDcIO:
         join_logger.addHandler(logging.NullHandler())
         join_logger.propagate = False
 
+        # samba.join narrates the join with print(); inside the module that
+        # would land on the process's stdout, which carries the JSON result.
+        transcript = samba_local.Transcript()
         try:
-            join_mod.join_DC(
-                logger=join_logger,
-                server=params["server"],
-                creds=creds,
-                lp=load_parm,
-                site=params["site"],
-                netbios_name=netbios_name,
-                domain=params["domain"],
-                dns_backend=params["dns_backend"],
-            )
+            with transcript:
+                join_mod.join_DC(
+                    logger=join_logger,
+                    server=params["server"],
+                    creds=creds,
+                    lp=load_parm,
+                    site=params["site"],
+                    netbios_name=netbios_name,
+                    domain=params["domain"],
+                    dns_backend=params["dns_backend"],
+                )
         except logic.SambaJoinDcError:
             raise
         except Exception as exc:
-            raise logic.SambaJoinDcError("joining the domain failed: %s" % to_native(exc))
+            raise logic.SambaJoinDcError(
+                "joining the domain failed: %s%s" % (to_native(exc), transcript.tail())
+            )
+        self.output = transcript.lines
 
         domain = samba_local.read_local_domain()
         if domain is None:
@@ -293,6 +314,8 @@ def main():
             exception=traceback.format_exc(),
         )
 
+    if join_io.output is not None:
+        result["output"] = join_io.output
     module.exit_json(**result)
 
 

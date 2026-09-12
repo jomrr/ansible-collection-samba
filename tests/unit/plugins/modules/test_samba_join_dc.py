@@ -98,6 +98,8 @@ class FakeJoinMod:
 
     def join_DC(self, **kwargs):
         self.captured = kwargs
+        # samba.join narrates the join on stdout.
+        print("Adding CN=DC2,OU=Domain Controllers,DC=samdom,DC=example,DC=com")
 
 
 def _join_params(**over):
@@ -198,9 +200,10 @@ def test_io_join_derives_netbios_name_when_omitted(monkeypatch):
     assert fake_join.captured["netbios_name"] == "DERIVEDNB"
 
 
-def test_io_join_failure_is_clean_error(monkeypatch):
+def test_io_join_failure_is_clean_error_quoting_samba(monkeypatch, capsys):
     class BoomJoin:
         def join_DC(self, **kwargs):
+            print("DsAddEntry failed with status WERR_DS_DRA_ACCESS_DENIED")
             raise RuntimeError("failed to connect to the existing DC")
 
     monkeypatch.setattr(samba_join_dc.importlib, "import_module", lambda name: {
@@ -208,5 +211,20 @@ def test_io_join_failure_is_clean_error(monkeypatch):
         "samba.credentials": FakeCredentialsMod(),
         "samba.param": FakeParam,
     }[name])
-    with pytest.raises(logic.SambaJoinDcError):
+    with pytest.raises(logic.SambaJoinDcError) as raised:
         samba_join_dc.SambaJoinDcIO(module=None).join(_join_params())
+    # The cause plus what samba printed last; nothing on the process's stdout.
+    assert "failed to connect to the existing DC" in str(raised.value)
+    assert "WERR_DS_DRA_ACCESS_DENIED" in str(raised.value)
+    assert capsys.readouterr().out == ""
+
+
+def test_io_join_keeps_samba_output_off_stdout_and_returns_it(monkeypatch, capsys):
+    fake_join = FakeJoinMod()
+    _patch_join(monkeypatch, fake_join, FakeCredentialsMod())
+    join_io = samba_join_dc.SambaJoinDcIO(module=None)
+    join_io.join(_join_params())
+    # Nothing reached stdout (which carries the JSON result)...
+    assert capsys.readouterr().out == ""
+    # ...the narration is returned instead.
+    assert join_io.output == ["Adding CN=DC2,OU=Domain Controllers,DC=samdom,DC=example,DC=com"]

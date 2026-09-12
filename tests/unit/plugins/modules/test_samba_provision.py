@@ -60,6 +60,8 @@ class FakeProvisionModule:
 
     def provision(self, logger, session, **kwargs):
         self.captured = kwargs
+        # provision() prints this on the normal DC path.
+        print("Temporarily overriding 'dsdb:schema update allowed' setting")
         return FakeResult()
 
 
@@ -100,9 +102,33 @@ def test_io_provision_maps_parameters(monkeypatch):
     assert "S3cret-Passw0rd!" not in repr(out)
 
 
-def test_io_provision_failure_is_clean_error(monkeypatch):
+def _minimal_params():
+    return {
+        "realm": "SAMDOM.EXAMPLE.COM", "domain": "SAMDOM", "hostname": None,
+        "admin_password": "weak", "dns_backend": "SAMBA_INTERNAL",
+        "server_role": "dc", "function_level": "2008_R2", "use_rfc2307": False,
+    }
+
+
+def test_io_provision_keeps_samba_output_off_stdout_and_returns_it(monkeypatch, capsys):
+    _patch_imports(monkeypatch, {
+        "samba.param": FakeParam,
+        "samba.provision": FakeProvisionModule(),
+        "samba.auth": FakeAuth,
+        "samba.functional_level": FakeFunctionalLevel,
+    })
+    provision_io = samba_provision.SambaProvisionIO(module=None)
+    provision_io.provision(_minimal_params())
+    # Nothing reached stdout (which carries the JSON result)...
+    assert capsys.readouterr().out == ""
+    # ...the line is returned instead.
+    assert provision_io.output == ["Temporarily overriding 'dsdb:schema update allowed' setting"]
+
+
+def test_io_provision_failure_is_clean_error_quoting_samba(monkeypatch, capsys):
     class BoomProvision:
         def provision(self, logger, session, **kwargs):
+            print("Provisioning the new domain failed at the schema step")
             raise RuntimeError("password does not meet the complexity requirements")
 
     _patch_imports(monkeypatch, {
@@ -111,12 +137,11 @@ def test_io_provision_failure_is_clean_error(monkeypatch):
         "samba.auth": FakeAuth,
         "samba.functional_level": FakeFunctionalLevel,
     })
-    with pytest.raises(logic.SambaProvisionError):
-        samba_provision.SambaProvisionIO(module=None).provision({
-            "realm": "SAMDOM.EXAMPLE.COM", "domain": "SAMDOM", "hostname": None,
-            "admin_password": "weak", "dns_backend": "SAMBA_INTERNAL",
-            "server_role": "dc", "function_level": "2008_R2", "use_rfc2307": False,
-        })
+    with pytest.raises(logic.SambaProvisionError) as raised:
+        samba_provision.SambaProvisionIO(module=None).provision(_minimal_params())
+    assert "complexity requirements" in str(raised.value)
+    assert "schema step" in str(raised.value)
+    assert capsys.readouterr().out == ""
 
 
 # read_state delegates to the shared samba_local helper; these confirm the

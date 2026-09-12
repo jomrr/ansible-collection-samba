@@ -17,3 +17,13 @@
         bind_password: "{{ samba_admin_password }}"
         dns_backend: SAMBA_INTERNAL
         state: present
+      register: _join
+
+    # samba.join narrates the join with print(); the module keeps that off its
+    # stdout (which carries the JSON result) and returns it on the run that
+    # joined. The idempotence re-run joins nothing and returns no output.
+    - name: Converge | The join returned samba's narration instead of printing it
+      ansible.builtin.assert:
+        that:
+          - (_join is changed) == (_join.output is defined)
+          - not (_join is changed) or (_join.output | length > 0)

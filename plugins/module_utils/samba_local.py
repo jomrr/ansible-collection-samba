@@ -8,12 +8,15 @@ These modules act on the LOCAL host before any reachable DC exists, so they open
 the local ``sam.ldb`` by path with a system session - the credential-free local
 path the object modules abandoned (see Connection Model) - rather than the
 ``ldap://`` GSSAPI layer. All ``samba`` imports are lazy (the sanity container
-has no ``samba``), the same constraint as samba_conn.
+has no ``samba``), the same constraint as samba_conn. :class:`Transcript` keeps
+what ``samba.join``/``samba.provision`` print off the module's stdout.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib
+import io
 import os
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
@@ -22,6 +25,34 @@ from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 class LocalSamdbError(Exception):
     """A local ``sam.ldb`` exists but could not be opened (for lack of
     privileges, or as an AD DC: a partial/broken install)."""
+
+
+class Transcript(contextlib.redirect_stdout):
+    """Collect what a samba library call prints while it runs.
+
+    ``samba.join`` and ``samba.provision`` narrate their work with ``print()``.
+    Inside a module that would land on the process's stdout, where Ansible
+    expects the JSON result and merely tolerates other lines. As a context
+    manager this diverts stdout for the duration of the call; the lines stay
+    available afterwards, also when the call raised, so an error can quote
+    what samba said last.
+    """
+
+    def __init__(self):
+        self.buffer = io.StringIO()
+        super().__init__(self.buffer)
+
+    @property
+    def lines(self):
+        """The captured lines, without line endings."""
+        return self.buffer.getvalue().splitlines()
+
+    def tail(self, count=5):
+        """The last ``count`` lines for an error message, or an empty string."""
+        lines = self.lines[-count:]
+        if not lines:
+            return ""
+        return "; samba reported: %s" % " | ".join(lines)
 
 
 def read_local_domain():

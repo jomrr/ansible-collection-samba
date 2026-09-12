@@ -160,6 +160,16 @@ domain:
       returned: when the host is provisioned
       type: str
       sample: S-1-5-21-1234567890-1234567890-1234567890
+output:
+  description:
+    - What samba printed while provisioning (one entry per line). Captured so
+      it cannot corrupt the module result, and returned for diagnostics; when
+      provisioning fails, its last lines are quoted in the error.
+  returned: when the host was provisioned in this run
+  type: list
+  elements: str
+  sample:
+    - "Temporarily overriding 'dsdb:schema update allowed' setting"
 """
 
 import importlib
@@ -186,6 +196,8 @@ class SambaProvisionIO:
 
     def __init__(self, module):
         self.module = module
+        #: What samba printed during provisioning (None until it ran).
+        self.output = None
 
     @staticmethod
     def _load_parm():
@@ -218,7 +230,9 @@ class SambaProvisionIO:
         verified parameter mapping. The admin password is passed only to samba
         and never returned, logged or echoed in an error. A failure (including a
         weak password rejected by samba, or a non-empty private dir) is turned
-        into a clear error instead of a raw traceback.
+        into a clear error instead of a raw traceback. What samba prints while
+        provisioning is captured into ``output`` instead of reaching the
+        module's stdout.
         """
         provision_mod = importlib.import_module("samba.provision")
         auth = importlib.import_module("samba.auth")
@@ -232,24 +246,31 @@ class SambaProvisionIO:
         provision_logger.addHandler(logging.NullHandler())
         provision_logger.propagate = False
 
+        # provision() prints on its way too; inside the module that would land
+        # on the process's stdout, which carries the JSON result.
+        transcript = samba_local.Transcript()
         try:
-            result = provision_mod.provision(
-                provision_logger,
-                auth.system_session(),
-                realm=params["realm"],
-                domain=params["domain"],
-                hostname=params["hostname"],
-                adminpass=params["admin_password"],
-                dns_backend=params["dns_backend"],
-                serverrole=params["server_role"],
-                dom_for_fun_level=functional_level.string_to_level(params["function_level"]),
-                use_rfc2307=params["use_rfc2307"],
-                lp=load_parm,
-            )
+            with transcript:
+                result = provision_mod.provision(
+                    provision_logger,
+                    auth.system_session(),
+                    realm=params["realm"],
+                    domain=params["domain"],
+                    hostname=params["hostname"],
+                    adminpass=params["admin_password"],
+                    dns_backend=params["dns_backend"],
+                    serverrole=params["server_role"],
+                    dom_for_fun_level=functional_level.string_to_level(params["function_level"]),
+                    use_rfc2307=params["use_rfc2307"],
+                    lp=load_parm,
+                )
         except logic.SambaProvisionError:
             raise
         except Exception as exc:
-            raise logic.SambaProvisionError("provisioning the domain failed: %s" % to_native(exc))
+            raise logic.SambaProvisionError(
+                "provisioning the domain failed: %s%s" % (to_native(exc), transcript.tail())
+            )
+        self.output = transcript.lines
 
         return {"domaindn": result.domaindn, "domainsid": str(result.domainsid)}
 
@@ -282,6 +303,8 @@ def main():
             exception=traceback.format_exc(),
         )
 
+    if provision_io.output is not None:
+        result["output"] = provision_io.output
     module.exit_json(**result)
 
 
