@@ -1,6 +1,12 @@
 ---
 # Build the antsibull-docs Sphinx docsite and deploy it to GitHub Pages.
 #
+# Runs once the main workflow (lint, sanity, units, Molecule matrix) has
+# completed for a push to main, and only if it succeeded, for the very commit
+# it validated: the docsite never shows a state the gates rejected. After a red
+# main run the build is skipped, and the deploy with it, so the previous
+# docsite stays online. workflow_dispatch deploys manually, without that gate.
+#
 # NOTE for the maintainer: this deploy only takes effect once GitHub Pages is
 # enabled for the repository with Settings -> Pages -> "Build and deployment" ->
 # Source = "GitHub Actions". Until then the build runs but the deploy step has
@@ -12,7 +18,13 @@
 name: docs
 
 "on":
-  push:
+  workflow_run:
+    workflows:
+      - main
+    types:
+      - completed
+    # Head branch of the triggering run: only pushes to main, not the PR runs
+    # from dev or the v* tag runs.
     branches:
       - main
   workflow_dispatch:
@@ -34,14 +46,18 @@ env:
 jobs:
   build:
     name: Build the docsite
+    # Manual runs build unconditionally; workflow_run only after a green main.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Check out the collection
         # antsibull-docs needs the collection at ansible_collections/<ns>/<name>
-        # so `--use-current` can find it.
+        # so `--use-current` can find it. head_sha is the commit the main run
+        # validated; github.sha would be the tip of main when this run starts.
         uses: actions/checkout@v5
         with:
           path: ansible_collections/jomrr/samba
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
