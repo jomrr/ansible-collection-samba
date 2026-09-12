@@ -159,8 +159,14 @@ class FakeCredentials:
     def set_realm(self, realm):
         self.calls["realm"] = realm
 
+    def set_kerberos_state(self, state):
+        self.calls["kerberos"] = state
+
 
 class FakeCredentialsMod:
+    AUTO_USE_KERBEROS = 1
+    MUST_USE_KERBEROS = 2
+
     def __init__(self):
         self.last = None
 
@@ -213,6 +219,7 @@ def _join_params(**over):
         "bind_username": "Administrator",
         "bind_password": "S3cret-Passw0rd!",
         "machinepass": "M@chine-Passw0rd!",
+        "use_kerberos": "required",
         "force": False,
         "state": "present",
     }
@@ -254,6 +261,22 @@ def test_io_join_maps_parameters_and_uses_credentials(monkeypatch):
     assert out == {"workgroup": "SAMDOM", "netbios_name": "DERIVEDNB", "domainsid": "S-1-5-21-7"}
     assert "S3cret-Passw0rd!" not in repr(out)
     assert "M@chine-Passw0rd!" not in repr(out)
+
+
+def test_io_join_requires_kerberos_by_default(monkeypatch):
+    creds_mod = FakeCredentialsMod()
+    _patch_join_imports(monkeypatch, FakeNetS3Mod(), creds_mod, FakeS3Param())
+    samba_join_member.SambaJoinMemberIO(module=None).join(_join_params())
+    # guess() would leave smb.conf's policy (usually "desired"); the module
+    # pins Kerberos so the join fails rather than falling back to NTLM.
+    assert creds_mod.last.calls["kerberos"] == FakeCredentialsMod.MUST_USE_KERBEROS
+
+
+def test_io_join_desired_allows_the_ntlm_fallback(monkeypatch):
+    creds_mod = FakeCredentialsMod()
+    _patch_join_imports(monkeypatch, FakeNetS3Mod(), creds_mod, FakeS3Param())
+    samba_join_member.SambaJoinMemberIO(module=None).join(_join_params(use_kerberos="desired"))
+    assert creds_mod.last.calls["kerberos"] == FakeCredentialsMod.AUTO_USE_KERBEROS
 
 
 def test_io_join_machinepass_none_is_passed_through(monkeypatch):

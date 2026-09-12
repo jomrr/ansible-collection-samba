@@ -89,6 +89,22 @@ options:
       - BIND9_DLZ
       - BIND9_FLATFILE
       - NONE
+  use_kerberos:
+    description:
+      - How the join authenticates to the existing domain controller.
+      - C(required) (the default) authenticates with Kerberos only and fails
+        rather than falling back to NTLM - the same stance as the object
+        modules of this collection.
+      - C(desired) tries Kerberos first and falls back to NTLM when no KDC can
+        be reached, for hosts whose Kerberos client setup (KDC discovery,
+        clock) is not complete at join time. NTLM never sends the password in
+        plain text, but it is the weaker mechanism.
+    type: str
+    default: required
+    choices:
+      - required
+      - desired
+    version_added: 2.0.0
   state:
     description:
       - Whether the host should be a DC of the domain (C(present)). Only
@@ -160,7 +176,11 @@ import traceback
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import fail_without_bindings
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import (
+    KERBEROS_CHOICES,
+    apply_kerberos_policy,
+    fail_without_bindings,
+)
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_local
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_dc_logic as logic
 
@@ -214,6 +234,9 @@ class SambaJoinDcIO:
         creds.set_username(params["bind_username"])
         creds.set_password(params["bind_password"])
         creds.set_realm(params["realm"])
+        # guess() takes the Kerberos policy from smb.conf (usually "desired");
+        # the module decides it explicitly, Kerberos required by default.
+        apply_kerberos_policy(creds, credentials, params["use_kerberos"])
 
         join_logger = logging.getLogger("jomrr.samba.samba_join_dc")
         join_logger.addHandler(logging.NullHandler())
@@ -252,6 +275,7 @@ def main():
         netbios_name=dict(type="str"),
         site=dict(type="str"),
         dns_backend=dict(type="str", default="SAMBA_INTERNAL", choices=logic.DNS_BACKENDS),
+        use_kerberos=dict(type="str", default="required", choices=KERBEROS_CHOICES),
         state=dict(type="str", default="present", choices=["present"]),
     )
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)

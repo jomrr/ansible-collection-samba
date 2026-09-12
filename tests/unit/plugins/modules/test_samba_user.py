@@ -431,6 +431,53 @@ def test_move_target_path_missing_fails():
     assert "move" not in call_names(fake)
 
 
+# --- check mode validates the target location like a real run ---
+
+class _NoParentIO(FakeIO):
+    def parent_exists(self, path):
+        return False
+
+
+def test_check_mode_create_with_missing_parent_fails_like_a_real_run():
+    fake = _NoParentIO(current=None)
+    with pytest.raises(logic.SambaUserError):
+        logic.run(make_params(password="S3cret!", path="OU=Missing,DC=example,DC=com"), True, fake)
+    assert "create_user" not in call_names(fake)
+
+
+def test_check_mode_move_to_missing_parent_fails_like_a_real_run():
+    class _MissingParentMovingIO(_MovingIO):
+        def parent_exists(self, path):
+            return False
+
+    fake = _MissingParentMovingIO(current=existing_user())
+    with pytest.raises(logic.SambaUserError):
+        logic.run(make_params(path="OU=Missing,DC=example,DC=com"), True, fake)
+    assert "move" not in call_names(fake)
+
+
+def test_check_mode_invalid_path_fails_like_a_real_run():
+    class _InvalidPathIO(FakeIO):
+        def parent_exists(self, path):
+            raise logic.SambaUserError("path '%s' is not a valid distinguished name" % path)
+
+    fake = _InvalidPathIO(current=None)
+    with pytest.raises(logic.SambaUserError):
+        logic.run(make_params(password="S3cret!", path="INVALID PATH"), True, fake)
+
+
+def test_parent_probe_skipped_when_nothing_is_created_or_moved():
+    class _CountingIO(FakeIO):
+        def parent_exists(self, path):
+            self.calls.append(("parent_exists", path))
+            return True
+
+    fake = _CountingIO(current=existing_user())
+    result = logic.run(make_params(path="CN=Users,DC=example,DC=com"), False, fake)
+    assert result["changed"] is False
+    assert "parent_exists" not in call_names(fake)
+
+
 def test_move_then_attribute_change_in_order():
     fake = _MovingIO(current=existing_user(display_name="Old"))
     result = logic.run(make_params(display_name="New", path="OU=Eng,DC=example,DC=com"), False, fake)

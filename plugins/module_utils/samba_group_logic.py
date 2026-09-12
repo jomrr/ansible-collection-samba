@@ -314,6 +314,16 @@ def run(params, check_mode, io):
         and current is not None
         and io.needs_move(current["_dn"], path)
     )
+
+    # Validate the target location (path parses, parent exists) before anything
+    # is reported or written, so check mode fails exactly where a real run would
+    # and no partial create or move happens. Read-only; skipped when nothing is
+    # created or moved. The narrow race where the parent vanishes afterwards is
+    # caught by move().
+    if state == "present" and path is not None and (current is None or move_needed) \
+            and not io.parent_exists(path):
+        raise SambaGroupError("path '%s' does not exist; create it first" % path)
+
     action = planned["action"]
     if action == "none" and (member_planned or move_needed):
         action = "modify"
@@ -349,12 +359,6 @@ def run(params, check_mode, io):
             result["diff"] = {"before": {}, "after": {}}
         result["group"] = {"name": name, "state": "absent"}
         return result
-
-    # Fail before any write if the target parent is missing (no partial create
-    # or move). The narrow race where it vanishes afterwards is caught by move().
-    if (planned["action"] == "create" or move_needed) and path is not None \
-            and not io.parent_exists(path):
-        raise SambaGroupError("path '%s' does not exist; create it first" % path)
 
     created = planned["action"] == "create"
     if created:

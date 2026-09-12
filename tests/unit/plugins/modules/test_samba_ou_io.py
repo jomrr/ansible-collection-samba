@@ -130,6 +130,17 @@ def test_invalid_path_raises_clean():
         make_io(FakeSamDB())._ou_dn("Staff", "INVALID PATH")
 
 
+def test_parent_exists_true_and_false():
+    assert make_io(FakeSamDB(search_result=["present"])).parent_exists("OU=Staff,DC=example,DC=com") is True
+    samdb = FakeSamDB(search_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
+    assert make_io(samdb).parent_exists("OU=Missing,DC=example,DC=com") is False
+
+
+def test_parent_exists_invalid_path_raises_clean():
+    with pytest.raises(logic.SambaOuError):
+        make_io(FakeSamDB()).parent_exists("INVALID PATH")
+
+
 def test_read_current_absent_returns_none():
     samdb = FakeSamDB(search_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
     assert make_io(samdb).read_current("Staff", "DC=example,DC=com") is None

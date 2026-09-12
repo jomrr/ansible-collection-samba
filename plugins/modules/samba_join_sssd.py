@@ -92,6 +92,7 @@ options:
       - Always reports a change; I(bind_password) is required.
     type: bool
     default: false
+    version_added: 2.0.0
   state:
     description:
       - Whether the host should be joined (C(present)). Only C(present) is

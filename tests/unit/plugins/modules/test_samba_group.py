@@ -353,6 +353,28 @@ def test_move_target_path_missing_fails():
     assert "move" not in call_names(fake)
 
 
+def test_check_mode_create_with_missing_parent_fails_like_a_real_run():
+    class _NoParentIO(FakeIO):
+        def parent_exists(self, path):
+            return False
+
+    fake = _NoParentIO(current=None)
+    with pytest.raises(logic.SambaGroupError):
+        logic.run(make_params(path="OU=Missing,DC=example,DC=com"), True, fake)
+    assert "create_group" not in call_names(fake)
+
+
+def test_check_mode_move_to_missing_parent_fails_like_a_real_run():
+    class _MissingParentMovingIO(_MovingIO):
+        def parent_exists(self, path):
+            return False
+
+    fake = _MissingParentMovingIO(current=existing_group())
+    with pytest.raises(logic.SambaGroupError):
+        logic.run(make_params(path="OU=Missing,DC=example,DC=com"), True, fake)
+    assert "move" not in call_names(fake)
+
+
 def test_move_before_member_changes():
     fake = _MovingIO(current=existing_group())
     result = logic.run(make_params(members=["jdoe"], path="OU=Groups,DC=example,DC=com"), False, fake)

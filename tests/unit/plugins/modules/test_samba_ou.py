@@ -25,6 +25,9 @@ class FakeIO:
         self.calls.append(("read_current", name, path))
         return self.current
 
+    def parent_exists(self, path):
+        return True
+
     def create_ou(self, name, path, description):
         self.calls.append(("create_ou", name, path, description))
         self.current = {"description": description, "_dn": "OU=%s,%s" % (name, path)}
@@ -138,6 +141,18 @@ def test_check_mode_delete_does_not_write():
     result = logic.run(make_params(state="absent"), True, fake)
     assert result["changed"] is True
     assert "delete_ou" not in call_names(fake)
+
+
+def test_create_with_missing_parent_fails_in_check_mode_and_for_real():
+    class _NoParentIO(FakeIO):
+        def parent_exists(self, path):
+            return False
+
+    for check_mode in (True, False):
+        fake = _NoParentIO(current=None)
+        with pytest.raises(logic.SambaOuError):
+            logic.run(make_params(path="OU=Missing,DC=example,DC=com"), check_mode, fake)
+        assert "create_ou" not in call_names(fake)
 
 
 # --- removing the description (empty string) ---

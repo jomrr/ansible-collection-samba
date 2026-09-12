@@ -49,6 +49,25 @@ def connection_argument_spec():
     )
 
 
+#: Kerberos policy choices of the join modules. The object modules have no
+#: choice: they always require Kerberos (see build_credentials).
+KERBEROS_CHOICES = ["required", "desired"]
+
+
+def apply_kerberos_policy(creds, credentials, use_kerberos):
+    """Set the Kerberos policy on a ``samba.credentials.Credentials`` object.
+
+    ``required`` authenticates with Kerberos only and fails rather than falling
+    back to NTLM (the collection's default stance). ``desired`` tries Kerberos
+    and falls back to NTLM when no KDC can be reached - the samba-tool default,
+    for hosts whose Kerberos client setup is not complete at join time.
+    """
+    if use_kerberos == "required":
+        creds.set_kerberos_state(credentials.MUST_USE_KERBEROS)
+    else:
+        creds.set_kerberos_state(credentials.AUTO_USE_KERBEROS)
+
+
 def has_samba_bindings() -> bool:
     """Return True if the samba python bindings are importable."""
     return importlib.util.find_spec("samba") is not None

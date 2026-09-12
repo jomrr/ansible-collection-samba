@@ -128,6 +128,18 @@
         or "creating user 'weakpw' failed" not in _weakpw.msg
         or 'check_password_restrictions' not in _weakpw.msg
 
+    - name: Converge | Check mode fails like a real run when the target OU is missing
+      # The parent probe runs before check mode reports anything, so a dry run
+      # cannot claim "changed" for a create the real run would refuse.
+      jomrr.samba.samba_user:
+        username: ghostpath
+        password: "{{ _password }}"
+        path: "OU=nowhere,{{ samba_base_dn }}"
+        state: present
+      check_mode: true
+      register: _ghostpath
+      failed_when: _ghostpath is not failed or 'does not exist' not in _ghostpath.msg
+
     - name: Converge | Absent on a non-existent user is a no-op
       jomrr.samba.samba_user:
         username: ghost

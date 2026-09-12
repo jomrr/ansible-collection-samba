@@ -79,6 +79,22 @@ options:
       - B(Security) - marked C(no_log); never appears in the return value, diff
         or an error.
     type: str
+  use_kerberos:
+    description:
+      - How the join authenticates to the existing domain controller.
+      - C(required) (the default) authenticates with Kerberos only and fails
+        rather than falling back to NTLM - the same stance as the object
+        modules of this collection.
+      - C(desired) tries Kerberos first and falls back to NTLM when no KDC can
+        be reached, for hosts whose Kerberos client setup (KDC discovery,
+        clock) is not complete at join time. NTLM never sends the password in
+        plain text, but it is the weaker mechanism.
+    type: str
+    default: required
+    choices:
+      - required
+      - desired
+    version_added: 2.0.0
   force:
     description:
       - Join again even though the host already has a machine account,
@@ -87,6 +103,7 @@ options:
       - Always reports a change; I(bind_password) is required.
     type: bool
     default: false
+    version_added: 2.0.0
   state:
     description:
       - Whether the host should be a member of the domain (C(present)). Only
@@ -173,7 +190,11 @@ import traceback
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import fail_without_bindings
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import (
+    KERBEROS_CHOICES,
+    apply_kerberos_policy,
+    fail_without_bindings,
+)
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_member_logic as logic
 
 
@@ -255,6 +276,9 @@ class SambaJoinMemberIO:
         creds.set_username(params["bind_username"])
         creds.set_password(params["bind_password"])
         creds.set_realm(params["realm"])
+        # guess() takes the Kerberos policy from smb.conf (usually "desired");
+        # the module decides it explicitly, Kerberos required by default.
+        apply_kerberos_policy(creds, credentials, params["use_kerberos"])
 
         smb_conf = load_parm.configfile or param.default_path()
         s3_lp = s3param.get_context()
@@ -283,6 +307,7 @@ def main():
         bind_username=dict(type="str", required=True),
         bind_password=dict(type="str", no_log=True),
         machinepass=dict(type="str", no_log=True),
+        use_kerberos=dict(type="str", default="required", choices=KERBEROS_CHOICES),
         force=dict(type="bool", default=False),
         state=dict(type="str", default="present", choices=["present"]),
     )

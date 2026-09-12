@@ -452,7 +452,14 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
 - **Security (rule 8):** the domain-admin join password is `no_log` and never
   appears in return, diff, error or log. Credential passing, verified:
   - bindings (join_DC, net_s3 join_member): via `samba.credentials.Credentials`
-    (`set_password`), never on a command line.
+    (`set_password`), never on a command line. Kerberos is required by default
+    (`use_kerberos: required`, the same stance as the object modules; decided
+    2026-09-12): `guess()` alone would leave smb.conf's `client use kerberos`
+    (usually "desired", samba-tool's try-Kerberos-then-NTLM), so the module
+    pins the policy explicitly. `use_kerberos: desired` restores the fallback
+    for hosts whose Kerberos client setup is incomplete at join time - a join
+    is bootstrapping, which is why this is configurable here and not for the
+    object modules. adcli always uses Kerberos.
   - `adcli join`: `--login-user=Administrator --stdin-password`, the password fed
     on **stdin**, never as an argv (which would show in `ps`).
   - The modules run no `net` subprocess any more (the membership decision is

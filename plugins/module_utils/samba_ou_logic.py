@@ -90,9 +90,10 @@ def build_diff(state, current, desired, planned):
 def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
-    ``io`` provides ``read_current``, ``create_ou``, ``set_description`` and
-    ``delete_ou`` and is responsible for the safe DN construction. Injecting it
-    keeps this function testable without the samba bindings.
+    ``io`` provides ``read_current``, ``parent_exists``, ``create_ou``,
+    ``set_description`` and ``delete_ou`` and is responsible for the safe DN
+    construction. Injecting it keeps this function testable without the samba
+    bindings.
     """
     name = params["name"]
     path = params["path"]
@@ -101,6 +102,12 @@ def run(params, check_mode, io):
 
     current = io.read_current(name, path)
     planned = plan(state, current, desired)
+
+    # Validate the parent before anything is reported or written, so check mode
+    # fails exactly where a real run would. Read-only; only a create needs it.
+    # The narrow race where the parent vanishes afterwards is caught by create_ou().
+    if planned["action"] == "create" and not io.parent_exists(path):
+        raise SambaOuError("path '%s' does not exist; create it first" % path)
 
     result = {
         "changed": planned["changed"],

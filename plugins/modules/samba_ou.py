@@ -155,6 +155,14 @@ class SambaOuIO:
             raise logic.SambaOuError("path '%s' is not a valid distinguished name" % path)
         return samba_user_io.build_child_dn(self.samdb, "OU", name, parent)
 
+    def parent_exists(self, path):
+        """Return True if the parent container ``path`` exists (a read-only probe)."""
+        try:
+            parent = samba_user_io.parse_dn(self.samdb, path)
+        except ValueError:
+            raise logic.SambaOuError("path '%s' is not a valid distinguished name" % path)
+        return samba_user_io.dn_exists(self.samdb, parent)
+
     def read_current(self, name, path):
         """Return the normalized current state of the OU or ``None``."""
         ldb = samba_user_io.load_ldb()

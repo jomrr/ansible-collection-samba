@@ -76,8 +76,14 @@ class FakeCredentials:
     def set_realm(self, realm):
         self.calls["realm"] = realm
 
+    def set_kerberos_state(self, state):
+        self.calls["kerberos"] = state
+
 
 class FakeCredentialsMod:
+    AUTO_USE_KERBEROS = 1
+    MUST_USE_KERBEROS = 2
+
     def __init__(self):
         self.last = None
 
@@ -104,9 +110,39 @@ def _join_params(**over):
         "netbios_name": "DC2",
         "site": "Default-First-Site-Name",
         "dns_backend": "SAMBA_INTERNAL",
+        "use_kerberos": "required",
     }
     params.update(over)
     return params
+
+
+def _patch_join(monkeypatch, fake_join, fake_creds):
+    monkeypatch.setattr(samba_join_dc.importlib, "import_module", lambda name: {
+        "samba.join": fake_join,
+        "samba.credentials": fake_creds,
+        "samba.param": FakeParam,
+    }[name])
+    monkeypatch.setattr(samba_local, "read_local_domain", lambda: {
+        "domaindn": "DC=samdom,DC=example,DC=com",
+        "domainsid": "S-1-5-21-7",
+        "dnsdomain": "samdom.example.com",
+    })
+
+
+def test_io_join_requires_kerberos_by_default(monkeypatch):
+    fake_creds = FakeCredentialsMod()
+    _patch_join(monkeypatch, FakeJoinMod(), fake_creds)
+    samba_join_dc.SambaJoinDcIO(module=None).join(_join_params())
+    # guess() would leave smb.conf's policy (usually "desired"); the module
+    # pins Kerberos so the join fails rather than falling back to NTLM.
+    assert fake_creds.last.calls["kerberos"] == FakeCredentialsMod.MUST_USE_KERBEROS
+
+
+def test_io_join_desired_allows_the_ntlm_fallback(monkeypatch):
+    fake_creds = FakeCredentialsMod()
+    _patch_join(monkeypatch, FakeJoinMod(), fake_creds)
+    samba_join_dc.SambaJoinDcIO(module=None).join(_join_params(use_kerberos="desired"))
+    assert fake_creds.last.calls["kerberos"] == FakeCredentialsMod.AUTO_USE_KERBEROS
 
 
 def test_io_join_maps_parameters_and_uses_credentials(monkeypatch):
