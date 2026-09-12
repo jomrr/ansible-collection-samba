@@ -77,6 +77,12 @@ promote: ## Merge dev into main, push, and return to dev
 # of its own, so --ff-only succeeds; if work continued on dev meanwhile it
 # fails and the divergence is surfaced, as in promote (the release itself is
 # complete at that point).
+# The release runs locally under the maintainer's identity, so the release
+# commit and tag carry it too (PSR reads GIT_COMMIT_AUTHOR; without it the
+# author is the bot identity semantic-release <semantic-release>, which has no
+# account behind it). The commit message still marks the commit as generated.
+# Also set for release-dry, so the dry run shows the author the release uses.
+release release-dry: export GIT_COMMIT_AUTHOR = $(shell git config user.name) <$(shell git config user.email)>
 release: ## Cut a release from main, then fast-forward dev to it (needs GH_TOKEN)
 	git checkout main
 	semantic-release version --no-changelog && semantic-release publish
