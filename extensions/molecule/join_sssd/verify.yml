@@ -33,7 +33,7 @@
 
     - name: Verify | samba_join_sssd in check mode on a joined host is a no-op
       # No bind_password is needed for an already-joined host: the state is read
-      # via adcli testjoin before any password is required.
+      # from the local keytab (no DC contact) before any password is required.
       jomrr.samba.samba_join_sssd:
         realm: "{{ samba_realm }}"
         server: "{{ target_dc }}.{{ samba_realm | lower }}"
@@ -47,6 +47,24 @@
         that:
           - _check is not changed
           - _check.joined is true
+
+    - name: Verify | force re-joins an already joined host (deliberate re-join)
+      # The only way to re-create the machine account and keytab; the testjoin
+      # below then proves the forced re-join left a valid keytab behind.
+      jomrr.samba.samba_join_sssd:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        force: true
+        state: present
+      register: _forced
+
+    - name: Verify | The forced re-join reports a change and a join
+      ansible.builtin.assert:
+        that:
+          - _forced is changed
+          - _forced.joined is true
 
     - name: Verify | The Kerberos keytab was written
       ansible.builtin.stat:

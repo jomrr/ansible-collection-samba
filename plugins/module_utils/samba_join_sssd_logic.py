@@ -10,10 +10,11 @@ exists). This layer touches neither ``samba`` nor ``adcli``; it decides
 joined/not-joined from an injected ``io`` object (which runs ``adcli``), so it is
 unit-testable without the tool.
 
-Idempotency is binary - is this host already a valid member (``adcli testjoin``
-rc) - with a two-way discriminator (a member / not a member). Like
-``samba_join_member`` there is no "member of a different domain" case; the realm
-is an explicit parameter and a re-join simply re-establishes the keytab.
+Idempotency is binary - does the local keytab hold a machine principal for the
+realm - with a two-way discriminator (joined / not joined) that is decided
+locally, never by contacting a DC. Like ``samba_join_member`` there is no
+"member of a different domain" case; the realm is an explicit parameter and a
+re-join (``force``) simply re-establishes the keytab.
 """
 
 from __future__ import annotations
@@ -27,24 +28,25 @@ def run(params, check_mode, io):
     """Orchestrate the binary adcli-join decision.
 
     ``io`` provides ``read_state`` (``None`` when the host is not joined, a dict
-    ``{"realm", "keytab"}`` when it is, raising :class:`SambaJoinSssdError` when
-    ``adcli`` itself is missing) and ``join`` (runs ``adcli join``, returning the
-    non-secret result). Injecting it keeps this function testable without adcli.
+    ``{"realm", "keytab"}`` when it is; decided from the local keytab) and
+    ``join`` (runs ``adcli join``, returning the non-secret result, raising
+    :class:`SambaJoinSssdError` when ``adcli`` itself is missing). Injecting it
+    keeps this function testable without adcli.
 
-    ``state`` is always ``present``. The two cases:
-      * already joined (``adcli testjoin`` rc 0) -> idempotent no-op.
-      * not joined -> join.
+    ``state`` is always ``present``. The cases:
+      * already joined and not ``force`` -> idempotent no-op.
+      * not joined, or ``force`` -> join (a real change).
     """
     current = io.read_state()
 
-    if current is not None:
+    if current is not None and not params.get("force"):
         return {"changed": False, "joined": True, "domain": current}
 
     if not params.get("bind_password"):
         raise SambaJoinSssdError("bind_password is required to join a domain")
 
     if check_mode:
-        return {"changed": True, "joined": False, "domain": None}
+        return {"changed": True, "joined": current is not None, "domain": current}
 
     domain = io.join(params)
     return {"changed": True, "joined": True, "domain": domain}

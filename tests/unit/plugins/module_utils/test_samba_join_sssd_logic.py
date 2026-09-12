@@ -37,6 +37,7 @@ def make_params(**over):
         "bind_password": "S3cret-Passw0rd!",
         "computer_ou": None,
         "host_fqdn": None,
+        "force": False,
         "state": "present",
     }
     params.update(over)
@@ -96,7 +97,7 @@ def test_join_requires_bind_password_even_in_check_mode():
         logic.run(make_params(bind_password=None), True, io)
 
 
-def test_missing_adcli_raises():
+def test_read_state_error_propagates():
     io = FakeIO(missing=True)
     with pytest.raises(logic.SambaJoinSssdError):
         logic.run(make_params(), False, io)
@@ -106,3 +107,29 @@ def test_password_not_leaked_in_result():
     io = FakeIO(state=None)
     result = logic.run(make_params(bind_password="S3cret-Passw0rd!"), False, io)
     assert "S3cret-Passw0rd!" not in repr(result)
+
+
+# --- force ---
+
+def test_force_rejoins_a_joined_host():
+    io = FakeIO(state=_joined_state())
+    result = logic.run(make_params(force=True), False, io)
+    assert result["changed"] is True
+    assert result["joined"] is True
+    assert "join" in io.calls
+
+
+def test_force_check_mode_reports_change_without_joining():
+    io = FakeIO(state=_joined_state())
+    result = logic.run(make_params(force=True), True, io)
+    assert result["changed"] is True
+    assert result["joined"] is True
+    assert result["domain"] == _joined_state()
+    assert "join" not in io.calls
+
+
+def test_force_requires_bind_password():
+    io = FakeIO(state=_joined_state())
+    with pytest.raises(logic.SambaJoinSssdError):
+        logic.run(make_params(force=True, bind_password=None), False, io)
+    assert "join" not in io.calls

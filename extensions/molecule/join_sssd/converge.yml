@@ -8,8 +8,9 @@
 # Passing the DC FQDN as --domain-controller makes the join deterministic.
 #
 # Molecule's idempotence step re-runs this and asserts the second run reports no
-# changes (an existing valid join is a no-op via adcli testjoin); verify.yml adds
-# the joined-effect, check-mode and the RFC2307 `id` assertions.
+# changes (an existing join is a no-op: the keytab holds the host's machine
+# principal, decided locally); verify.yml adds the joined-effect, check-mode,
+# force and the RFC2307 `id` assertions.
 - name: Converge
   hosts: client
   gather_facts: false

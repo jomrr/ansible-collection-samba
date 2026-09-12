@@ -31,7 +31,7 @@
 
     - name: Verify | samba_join_member in check mode on a member is a no-op
       # No bind_password is needed for an already-joined member: the state is read
-      # via net ads testjoin before any password is required.
+      # from the local secrets store (no DC contact) before any password is required.
       jomrr.samba.samba_join_member:
         realm: "{{ samba_realm }}"
         server: "{{ target_dc }}.{{ samba_realm | lower }}"
@@ -45,6 +45,24 @@
         that:
           - _check is not changed
           - _check.joined is true
+
+    - name: Verify | force re-joins an already joined member (deliberate re-join)
+      # The only way to re-establish the machine account; the testjoin below then
+      # proves the forced re-join left a valid account behind.
+      jomrr.samba.samba_join_member:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        force: true
+        state: present
+      register: _forced
+
+    - name: Verify | The forced re-join reports a change and a member
+      ansible.builtin.assert:
+        that:
+          - _forced is changed
+          - _forced.joined is true
 
     - name: Verify | net ads testjoin confirms the machine account is valid
       ansible.builtin.command:

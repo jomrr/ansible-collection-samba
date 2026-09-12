@@ -23,10 +23,13 @@ description:
     responsibility. In particular the join requires a B(pre-configured smb.conf)
     that already sets C(realm), C(workgroup) and C(server role = member server);
     the module joins against that configuration, it does not write it.
-  - Idempotency is binary and uses C(net ads testjoin). If the host is already a
-    valid member the run is a no-op (C(changed=false)); otherwise it is joined.
-    There is no "member of a different domain" case - the domain is fixed by the
-    smb.conf - so a re-join simply re-establishes the machine account.
+  - Idempotency is binary and decided locally. A machine account in the local
+    Samba secrets store (what a join writes) means the host is a member; no
+    domain controller is contacted for that decision, so an unreachable or
+    degraded DC can never look like "not joined" and trigger a re-join. An
+    existing member is a no-op (C(changed=false)) unless I(force) is set.
+    There is no "member of a different domain" case - the domain is fixed by
+    the smb.conf - so a re-join simply re-establishes the machine account.
   - Only C(state=present) is supported. Leaving a domain is not offered.
   - Supports check mode - it reads whether the host is already a member and
     reports C(changed) accordingly, but joining itself cannot be performed in
@@ -35,9 +38,9 @@ author:
   - Jonas Mauer (@jomrr)
 requirements:
   - Must run locally on the host that is to become a member, with the C(samba)
-    Python bindings and the C(net) binary installed, typically as root, with a
-    pre-configured smb.conf (C(realm), C(workgroup), C(server role = member
-    server)) and network/Kerberos/DNS reachability to the existing DC.
+    Python bindings installed, typically as root, with a pre-configured
+    smb.conf (C(realm), C(workgroup), C(server role = member server)) and,
+    for the join itself, network/Kerberos/DNS reachability to the existing DC.
 options:
   realm:
     description:
@@ -76,6 +79,14 @@ options:
       - B(Security) - marked C(no_log); never appears in the return value, diff
         or an error.
     type: str
+  force:
+    description:
+      - Join again even though the host already has a machine account,
+        re-establishing it with a new machine password (for example after the
+        computer object was deleted on the domain).
+      - Always reports a change; I(bind_password) is required.
+    type: bool
+    default: false
   state:
     description:
       - Whether the host should be a member of the domain (C(present)). Only
@@ -113,6 +124,15 @@ EXAMPLES = r"""
     bind_username: Administrator
     bind_password: "{{ vault_domain_admin_password }}"
     machinepass: "{{ vault_machine_password }}"
+    state: present
+
+- name: Re-establish the machine account of an already joined member
+  jomrr.samba.samba_join_member:
+    realm: SAMDOM.EXAMPLE.COM
+    server: dc1.samdom.example.com
+    bind_username: Administrator
+    bind_password: "{{ vault_domain_admin_password }}"
+    force: true
     state: present
 """
 
@@ -162,35 +182,45 @@ class SambaJoinMemberIO:
 
     All ``samba`` imports are lazy (``importlib.import_module`` inside the
     methods), so importing this module never requires the bindings - the same
-    pattern as samba_conn. This module is local-only: it probes membership with
-    ``net ads testjoin`` (which uses the stored machine secret, so no credentials
-    touch the command line) and joins the local host as a member; the join
-    credentials reach the existing DC through the credentials object, not a
+    pattern as samba_conn. This module is local-only: membership is read from
+    the local secrets store (no subprocess, no DC contact) and the join
+    credentials reach the existing DC through the credentials object, never a
     command line.
     """
 
     def __init__(self, module):
         self.module = module
 
-    def _testjoin_rc(self):
-        """Return the rc of ``net ads testjoin`` (0 = a valid member)."""
-        net_bin = self.module.get_bin_path("net", required=True)
-        # testjoin validates the machine account using the secret in secrets.tdb;
-        # it needs no bind credentials, so nothing sensitive is ever on argv.
-        rc, dummy_out, dummy_err = self.module.run_command([net_bin, "ads", "testjoin"])
-        return rc
-
     def read_state(self):
         """Return the member identity if joined, else None.
 
-        Membership is the rc of ``net ads testjoin`` (not message matching). When
-        a member, the non-secret identity is read from the configured smb.conf.
+        The decision is local: ``Credentials.set_machine_account`` loads the
+        machine account from the local secrets store (what the join wrote) and
+        raises NT_STATUS_CANT_ACCESS_DOMAIN_INFO when there is none. No DC is
+        contacted, so an unreachable or degraded DC can never look like "not
+        joined" and trigger a re-join. Any other NTSTATUS (for example an
+        unreadable secrets store) is a clear error, matched by code.
         """
-        if self._testjoin_rc() != 0:
-            return None
+        samba = importlib.import_module("samba")
+        credentials = importlib.import_module("samba.credentials")
+        ntstatus = importlib.import_module("samba.ntstatus")
         param = importlib.import_module("samba.param")
         load_parm = param.LoadParm()
         load_parm.load_default()
+        creds = credentials.Credentials()
+        # guess() takes the domain (workgroup) from smb.conf; set_machine_account
+        # looks the stored secret up under that domain, so without it nothing is
+        # ever found and every host looks "not joined".
+        creds.guess(load_parm)
+        try:
+            creds.set_machine_account(load_parm)
+        except samba.NTSTATUSError as err:
+            if err.args[0] == ntstatus.NT_STATUS_CANT_ACCESS_DOMAIN_INFO:
+                return None
+            raise logic.SambaJoinMemberError(
+                "could not read the local machine account (NTSTATUS 0x%08X): %s"
+                % (err.args[0], to_native(err.args[1]))
+            )
         return {
             "workgroup": load_parm.get("workgroup"),
             "netbios_name": load_parm.get("netbios name"),
@@ -253,6 +283,7 @@ def main():
         bind_username=dict(type="str", required=True),
         bind_password=dict(type="str", no_log=True),
         machinepass=dict(type="str", no_log=True),
+        force=dict(type="bool", default=False),
         state=dict(type="str", default="present", choices=["present"]),
     )
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)

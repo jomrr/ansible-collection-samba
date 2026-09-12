@@ -26,9 +26,12 @@ description:
     the keytab) and its idempotency detection. It does B(not) write sssd.conf,
     wire up nsswitch/PAM, or enable or start the SSSD daemon - that is the
     caller's or a role's responsibility.
-  - Idempotency is binary and uses C(adcli testjoin). If the host already has a
-    valid machine account the run is a no-op (C(changed=false)); otherwise it is
-    joined. A re-join simply re-establishes the keytab.
+  - Idempotency is binary and decided locally. A machine principal for the
+    realm (C(host/<fqdn>) or C(<NAME>$)) in the keytab means the host is joined;
+    no domain controller is contacted for that decision, so an unreachable or
+    degraded DC can never look like "not joined" and trigger a re-join. A
+    joined host is a no-op (C(changed=false)) unless I(force) is set; a re-join
+    simply re-establishes the keytab.
   - Only C(state=present) is supported. Leaving a domain is not offered.
   - Supports check mode - it reads whether the host is already joined and reports
     C(changed) accordingly, but joining itself cannot be performed in check mode.
@@ -80,6 +83,15 @@ options:
       - Override the fully qualified domain name for the machine account. Passed
         to C(adcli --host-fqdn). If omitted, C(adcli) derives it from the host.
     type: str
+  force:
+    description:
+      - Join again even though the keytab already holds a machine principal
+        for the realm, re-creating the machine account and rewriting the
+        keytab (for example after the computer object was deleted on the
+        domain).
+      - Always reports a change; I(bind_password) is required.
+    type: bool
+    default: false
   state:
     description:
       - Whether the host should be joined (C(present)). Only C(present) is
@@ -116,6 +128,14 @@ EXAMPLES = r"""
     bind_password: "{{ vault_domain_admin_password }}"
     computer_ou: OU=Linux,DC=samdom,DC=example,DC=com
     state: present
+
+- name: Re-create the machine account and keytab of an already joined host
+  jomrr.samba.samba_join_sssd:
+    realm: SAMDOM.EXAMPLE.COM
+    bind_username: Administrator
+    bind_password: "{{ vault_domain_admin_password }}"
+    force: true
+    state: present
 """
 
 RETURN = r"""
@@ -150,19 +170,27 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_sssd_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_keytab
 
 #: adcli's default host keytab (used when --host-keytab is not overridden).
 KEYTAB_PATH = "/etc/krb5.keytab"
+
+
+def is_machine_principal(components):
+    """True for the principals adcli writes for the host: ``host/<name>`` or ``<NAME>$``."""
+    if not components:
+        return False
+    return components[0].lower() == "host" or (len(components) == 1 and components[0].endswith("$"))
 
 
 class SambaJoinSssdIO:
     """Join operations via the ``adcli`` command line tool.
 
     This is the CLI branch of the join family: no samba bindings are imported.
-    ``adcli`` is run through ``module.run_command``; the join password is fed on
-    stdin (``--stdin-password`` + ``data=``), never as an argv (which would show
-    in the process list). ``adcli testjoin`` is the idempotency probe and needs
-    no credentials (it validates the existing keytab).
+    ``adcli`` is run through ``module.run_command`` for the join only; the
+    password is fed on stdin (``--stdin-password`` + ``data=``), never as an
+    argv (which would show in the process list). Whether the host is joined is
+    read from the keytab adcli writes - locally, without adcli and without a DC.
     """
 
     def __init__(self, module):
@@ -181,17 +209,28 @@ class SambaJoinSssdIO:
     def read_state(self):
         """Return the join identity if joined, else None.
 
-        ``adcli testjoin`` validates the existing machine-account keytab, so it
-        needs no credentials and nothing sensitive is ever on argv. The rc is the
-        discriminator (not message matching).
+        The decision is local: the keytab adcli writes holds the host's machine
+        principals for the realm (``host/<fqdn>`` and ``<NAME>$``). No DC is
+        contacted, so an unreachable or degraded DC can never look like "not
+        joined" and trigger a re-join. A missing keytab means "not joined"; an
+        unreadable or malformed one is a clear error.
         """
-        adcli = self._adcli()
-        rc, dummy_out, dummy_err = self.module.run_command(
-            [adcli, "testjoin", "--domain=%s" % self.module.params["realm"]]
-        )
-        if rc != 0:
+        realm = self.module.params["realm"]
+        try:
+            principals = samba_keytab.read_principals(KEYTAB_PATH)
+        except FileNotFoundError:
             return None
-        return {"realm": self.module.params["realm"], "keytab": KEYTAB_PATH}
+        except OSError as err:
+            raise logic.SambaJoinSssdError("cannot read %s: %s" % (KEYTAB_PATH, to_native(err)))
+        except samba_keytab.KeytabError as err:
+            raise logic.SambaJoinSssdError("cannot parse %s: %s" % (KEYTAB_PATH, to_native(err)))
+        joined = any(
+            keytab_realm.upper() == realm.upper() and is_machine_principal(components)
+            for keytab_realm, components in principals
+        )
+        if not joined:
+            return None
+        return {"realm": realm, "keytab": KEYTAB_PATH}
 
     def join(self, params):
         """Join the host with ``adcli join`` and return its non-secret identity.
@@ -235,6 +274,7 @@ def main():
         bind_password=dict(type="str", no_log=True),
         computer_ou=dict(type="str"),
         host_fqdn=dict(type="str"),
+        force=dict(type="bool", default=False),
         state=dict(type="str", default="present", choices=["present"]),
     )
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)

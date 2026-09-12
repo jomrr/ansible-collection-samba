@@ -3,10 +3,10 @@
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_join_member I/O layer.
 
-The samba bindings are faked via importlib and the net binary via a fake module,
-so these run without them while exercising the testjoin discriminator and the
-join call's parameter mapping and credential handling. Importing the module must
-also not require samba."""
+The samba bindings are faked via importlib, so these run without them while
+exercising the local machine-account discriminator (no subprocess, no DC) and
+the join call's parameter mapping and credential handling. Importing the module
+must also not require samba."""
 
 from __future__ import annotations
 
@@ -21,11 +21,12 @@ def test_module_imports_without_samba():
     assert hasattr(samba_join_member, "SambaJoinMemberIO")
 
 
-# --- read_state: the net ads testjoin rc discriminator ---
+# --- read_state: the local machine-account discriminator ---
 
 class FakeModule:
-    def __init__(self, rc):
-        self._rc = rc
+    """Records any subprocess the I/O layer would start (it must start none)."""
+
+    def __init__(self):
         self.commands = []
 
     def get_bin_path(self, name, required=False):
@@ -33,7 +34,49 @@ class FakeModule:
 
     def run_command(self, argv):
         self.commands.append(argv)
-        return (self._rc, "", "")
+        return (0, "", "")
+
+
+class FakeNTStatusError(RuntimeError):
+    """Stand-in for samba.NTSTATUSError; args are (code, message)."""
+
+
+class FakeSamba:
+    NTSTATUSError = FakeNTStatusError
+
+
+class FakeNtstatus:
+    NT_STATUS_CANT_ACCESS_DOMAIN_INFO = 0xC00000DA
+    NT_STATUS_ACCESS_DENIED = 0xC0000022
+
+
+class FakeMachineCredentials:
+    def __init__(self, error):
+        self.error = error
+        self.guessed = False
+        self.loaded = False
+
+    def guess(self, lp):
+        self.guessed = True
+
+    def set_machine_account(self, lp):
+        # The secret is stored under the domain smb.conf names; without guess()
+        # the credentials carry no domain and the lookup can never succeed.
+        if not self.guessed:
+            raise AssertionError("set_machine_account called before guess()")
+        if self.error is not None:
+            raise self.error
+        self.loaded = True
+
+
+class FakeMachineCredentialsMod:
+    def __init__(self, error=None):
+        self.error = error
+        self.last = None
+
+    def Credentials(self):
+        self.last = FakeMachineCredentials(self.error)
+        return self.last
 
 
 class FakeLoadParm:
@@ -58,21 +101,44 @@ class FakeParam:
         return "/etc/samba/smb.conf"
 
 
+def _patch_state_imports(monkeypatch, creds_mod):
+    monkeypatch.setattr(samba_join_member.importlib, "import_module", lambda name: {
+        "samba": FakeSamba,
+        "samba.credentials": creds_mod,
+        "samba.ntstatus": FakeNtstatus,
+        "samba.param": FakeParam,
+    }[name])
+
+
 def test_io_read_state_not_a_member(monkeypatch):
-    module = FakeModule(rc=1)
+    # No machine account in the local secrets store: the bindings answer with
+    # NT_STATUS_CANT_ACCESS_DOMAIN_INFO, matched by code, and that means
+    # "not joined" - no subprocess, no DC contact.
+    module = FakeModule()
+    _patch_state_imports(monkeypatch, FakeMachineCredentialsMod(
+        error=FakeNTStatusError(FakeNtstatus.NT_STATUS_CANT_ACCESS_DOMAIN_INFO, "no domain info")))
     state = samba_join_member.SambaJoinMemberIO(module=module).read_state()
     assert state is None
-    # testjoin was the discriminator, and it carried no credentials on argv.
-    assert module.commands == [["/usr/bin/net", "ads", "testjoin"]]
+    assert module.commands == []
 
 
 def test_io_read_state_member_returns_identity(monkeypatch):
-    module = FakeModule(rc=0)
-    monkeypatch.setattr(samba_join_member.importlib, "import_module", lambda name: {
-        "samba.param": FakeParam,
-    }[name])
+    module = FakeModule()
+    creds_mod = FakeMachineCredentialsMod()
+    _patch_state_imports(monkeypatch, creds_mod)
     state = samba_join_member.SambaJoinMemberIO(module=module).read_state()
     assert state == {"workgroup": "SAMDOM", "netbios_name": "DERIVEDNB"}
+    assert creds_mod.last.loaded is True
+    assert module.commands == []
+
+
+def test_io_read_state_other_status_is_clean_error(monkeypatch):
+    # Anything but "no machine account" (for example an unreadable secrets
+    # store) must surface as a clear error, never be mistaken for "not joined".
+    _patch_state_imports(monkeypatch, FakeMachineCredentialsMod(
+        error=FakeNTStatusError(FakeNtstatus.NT_STATUS_ACCESS_DENIED, "access denied")))
+    with pytest.raises(logic.SambaJoinMemberError):
+        samba_join_member.SambaJoinMemberIO(module=FakeModule()).read_state()
 
 
 # --- join: parameter mapping, derived netbios name, safe credentials ---
@@ -147,6 +213,7 @@ def _join_params(**over):
         "bind_username": "Administrator",
         "bind_password": "S3cret-Passw0rd!",
         "machinepass": "M@chine-Passw0rd!",
+        "force": False,
         "state": "present",
     }
     params.update(over)

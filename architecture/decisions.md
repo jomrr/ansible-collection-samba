@@ -389,13 +389,31 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
   the existing DC and found in the joiner's replica) passed on all four joiner
   distros, the second run was an idempotent no-op, and the foreign-domain refusal
   fired live.)
-- **samba_join_member:** `net ads testjoin`
-  (`rc == 0` = the machine account is valid against the domain) is the robust
-  discriminator; `secrets.tdb` presence is the weaker fallback. (`testjoin` has
-  no clean binding, so the idempotency *check* uses the `net` CLI even though the
-  join itself uses the binding.)
-- **samba_join_sssd:** `adcli testjoin --domain=<realm>` (`rc == 0` = joined;
-  it validates the existing keytab and needs no credentials).
+- **samba_join_member:** the local join artifact decides.
+  `samba.credentials.Credentials.set_machine_account(lp)` loads the machine
+  account from the local secrets store (what `net_s3.join_member` wrote);
+  `NT_STATUS_CANT_ACCESS_DOMAIN_INFO` (matched by code) means "not a member",
+  any other NTSTATUS is a clear error. No subprocess, no DC contact.
+- **samba_join_sssd:** the local join artifact decides. The keytab adcli
+  writes (`/etc/krb5.keytab`) holds a machine principal for the realm
+  (`host/<fqdn>` or `<NAME>$`); it is read with a small standard-library
+  keytab parser (`module_utils/samba_keytab.py`, principal names only). A
+  missing keytab means "not joined", an unreadable or malformed one is a clear
+  error. No subprocess, no DC contact.
+- **Why local, not `testjoin` (revised 2026-09-12):** `net ads testjoin` and
+  `adcli testjoin` answer "is the join valid against a DC right now" - they
+  need a reachable DC found by DNS-SRV discovery, a working KDC and a sane
+  clock. Using that as the idempotency discriminator turned every such failure
+  into a *destructive* re-join (new machine password / keytab), and a plain DC
+  outage into a misleading "joining failed" plus a false `changed` in check
+  mode. A configuration-management module must never derive a destructive
+  action from an uncertain observation, so the discriminator is the local
+  artifact, exactly like `samba_join_dc` and its local `sam.ldb`. `testjoin`
+  remains what it is good at: an external verification in the Molecule verify
+  plays. A deliberate re-join is an explicit `force: true` on both modules
+  (always a change; requires `bind_password`). The earlier idea of
+  "`secrets.tdb` presence as the weaker fallback" was the right instinct in the
+  wrong role and was never implemented; it is superseded by this decision.
 
 ### Open design points
 
@@ -408,7 +426,9 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
     (`set_password`), never on a command line.
   - `adcli join`: `--login-user=Administrator --stdin-password`, the password fed
     on **stdin**, never as an argv (which would show in `ps`).
-  - `net` (for `testjoin` and any net call): credentials via the `PASSWD`
+  - The modules run no `net` subprocess any more (the membership decision is
+    local, see above). Where the Molecule verify plays still call `net` or
+    `samba-tool` for external verification, credentials go via the `PASSWD`
     environment variable, never `-U user%password` on the command line.
 - **Race/TOCTOU (rule 9):** the window between the state check and the join is
   negligible (one-time setup, not a concurrent path); a join failure is turned
