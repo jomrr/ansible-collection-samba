@@ -17,9 +17,11 @@ class FakeIO:
         self._state = state
         self._missing = missing
         self.calls = []
+        self.read_params = None
 
-    def read_state(self):
+    def read_state(self, params):
         self.calls.append("read_state")
+        self.read_params = params
         if self._missing:
             raise logic.SambaJoinSssdError("adcli was not found in PATH")
         return self._state
@@ -37,6 +39,7 @@ def make_params(**over):
         "bind_password": "S3cret-Passw0rd!",
         "computer_ou": None,
         "host_fqdn": None,
+        "keytab": "/etc/krb5.keytab",
         "force": False,
         "state": "present",
     }
@@ -52,11 +55,14 @@ def _joined_state(**over):
 
 def test_not_joined_joins():
     io = FakeIO(state=None)
-    result = logic.run(make_params(), False, io)
+    result = logic.run(make_params(keytab="/root/alt.keytab"), False, io)
     assert result["changed"] is True
     assert result["joined"] is True
     assert "join" in io.calls
     assert result["domain"]["realm"] == "SAMDOM.EXAMPLE.COM"
+    # The state read gets the module parameters (realm and keytab) handed in.
+    assert io.read_params["realm"] == "SAMDOM.EXAMPLE.COM"
+    assert io.read_params["keytab"] == "/root/alt.keytab"
 
 
 def test_already_joined_is_noop():

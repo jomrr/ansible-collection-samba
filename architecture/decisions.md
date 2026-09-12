@@ -432,7 +432,8 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
   `NT_STATUS_CANT_ACCESS_DOMAIN_INFO` (matched by code) means "not a member",
   any other NTSTATUS is a clear error. No subprocess, no DC contact.
 - **samba_join_sssd:** the local join artifact decides. The keytab adcli
-  writes (`/etc/krb5.keytab`) holds a machine principal for the realm
+  writes (`/etc/krb5.keytab` by default; the `keytab` option names another
+  and is passed as `--host-keytab`) holds a machine principal for the realm
   (`host/<fqdn>` or `<NAME>$`); it is read with a small standard-library
   keytab parser (`module_utils/samba_keytab.py`, principal names only). A
   missing keytab means "not joined", an unreadable or malformed one is a clear

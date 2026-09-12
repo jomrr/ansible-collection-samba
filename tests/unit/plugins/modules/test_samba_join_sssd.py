@@ -25,13 +25,16 @@ def test_module_imports():
 
 
 class FakeModule:
-    """Stands in for AnsibleModule: records run_command calls and their stdin."""
+    """Stands in for AnsibleModule: records run_command calls and their stdin.
 
-    def __init__(self, adcli="/usr/bin/adcli", join_rc=0, join_err="", params=None):
+    Deliberately without ``params``: the I/O gets the module parameters handed
+    in and must not reach for them through the module.
+    """
+
+    def __init__(self, adcli="/usr/bin/adcli", join_rc=0, join_err=""):
         self.adcli = adcli
         self.join_rc = join_rc
         self.join_err = join_err
-        self.params = params or {"realm": "SAMDOM.EXAMPLE.COM"}
         self.commands = []  # list of (argv, data)
 
     def get_bin_path(self, name, required=False):
@@ -52,6 +55,7 @@ def _join_params(**over):
         "bind_password": "S3cret-Passw0rd!",
         "computer_ou": "OU=Linux,DC=samdom,DC=example,DC=com",
         "host_fqdn": "client1.samdom.example.com",
+        "keytab": "/etc/krb5.keytab",
         "force": False,
         "state": "present",
     }
@@ -77,15 +81,18 @@ def _keytab(*principals):
 
 
 @pytest.fixture()
-def keytab_path(tmp_path, monkeypatch):
-    path = tmp_path / "krb5.keytab"
-    monkeypatch.setattr(samba_join_sssd, "KEYTAB_PATH", str(path))
-    return path
+def keytab_path(tmp_path):
+    return tmp_path / "krb5.keytab"
+
+
+def _read_state(module, keytab_path, **over):
+    """read_state with the keytab option pointing at the test file."""
+    return samba_join_sssd.SambaJoinSssdIO(module=module).read_state(_join_params(keytab=str(keytab_path), **over))
 
 
 def test_io_read_state_no_keytab_means_not_joined(keytab_path):
     module = FakeModule()
-    assert samba_join_sssd.SambaJoinSssdIO(module=module).read_state() is None
+    assert _read_state(module, keytab_path) is None
     # The decision is local: no adcli, no DC.
     assert module.commands == []
 
@@ -93,20 +100,26 @@ def test_io_read_state_no_keytab_means_not_joined(keytab_path):
 def test_io_read_state_host_principal_means_joined(keytab_path):
     keytab_path.write_bytes(_keytab(("SAMDOM.EXAMPLE.COM", ["host", "client1.samdom.example.com"])))
     module = FakeModule()
-    state = samba_join_sssd.SambaJoinSssdIO(module=module).read_state()
+    state = _read_state(module, keytab_path)
     assert state == {"realm": "SAMDOM.EXAMPLE.COM", "keytab": str(keytab_path)}
     assert module.commands == []
 
 
 def test_io_read_state_machine_account_principal_means_joined(keytab_path):
     keytab_path.write_bytes(_keytab(("SAMDOM.EXAMPLE.COM", ["CLIENT1$"])))
-    assert samba_join_sssd.SambaJoinSssdIO(module=FakeModule()).read_state() is not None
+    assert _read_state(FakeModule(), keytab_path) is not None
 
 
 def test_io_read_state_realm_is_case_insensitive(keytab_path):
     keytab_path.write_bytes(_keytab(("SAMDOM.EXAMPLE.COM", ["host", "client1"])))
-    module = FakeModule(params={"realm": "samdom.example.com"})
-    assert samba_join_sssd.SambaJoinSssdIO(module=module).read_state() is not None
+    assert _read_state(FakeModule(), keytab_path, realm="samdom.example.com") is not None
+
+
+def test_io_read_state_reads_the_keytab_the_option_names(keytab_path, tmp_path):
+    # The default keytab is joined, the one the option names is not: the
+    # option decides, not a fixed path.
+    keytab_path.write_bytes(_keytab(("SAMDOM.EXAMPLE.COM", ["host", "client1"])))
+    assert _read_state(FakeModule(), tmp_path / "other.keytab") is None
 
 
 def test_io_read_state_other_realm_or_service_principal_is_not_joined(keytab_path):
@@ -114,7 +127,7 @@ def test_io_read_state_other_realm_or_service_principal_is_not_joined(keytab_pat
         ("OTHER.EXAMPLE.COM", ["host", "client1.other.example.com"]),
         ("SAMDOM.EXAMPLE.COM", ["HTTP", "www.samdom.example.com"]),
     ))
-    assert samba_join_sssd.SambaJoinSssdIO(module=FakeModule()).read_state() is None
+    assert _read_state(FakeModule(), keytab_path) is None
 
 
 def test_io_read_state_unreadable_keytab_is_clean_error(keytab_path, monkeypatch):
@@ -123,13 +136,13 @@ def test_io_read_state_unreadable_keytab_is_clean_error(keytab_path, monkeypatch
 
     monkeypatch.setattr(samba_keytab, "read_principals", denied)
     with pytest.raises(logic.SambaJoinSssdError):
-        samba_join_sssd.SambaJoinSssdIO(module=FakeModule()).read_state()
+        _read_state(FakeModule(), keytab_path)
 
 
 def test_io_read_state_malformed_keytab_is_clean_error(keytab_path):
     keytab_path.write_bytes(b"\x05\x01garbage")
     with pytest.raises(logic.SambaJoinSssdError):
-        samba_join_sssd.SambaJoinSssdIO(module=FakeModule()).read_state()
+        _read_state(FakeModule(), keytab_path)
 
 
 def test_io_missing_adcli_raises_on_join():
@@ -155,9 +168,17 @@ def test_io_join_feeds_password_on_stdin_not_argv():
     assert "--domain-controller=dc1.samdom.example.com" in argv
     assert "--host-fqdn=client1.samdom.example.com" in argv
     assert "--domain-ou=OU=Linux,DC=samdom,DC=example,DC=com" in argv
+    assert "--host-keytab=/etc/krb5.keytab" in argv
     # Only the non-secret identity is returned; no password.
     assert out == {"realm": "SAMDOM.EXAMPLE.COM", "keytab": "/etc/krb5.keytab"}
     assert "S3cret-Passw0rd!" not in repr(out)
+
+
+def test_io_join_writes_the_keytab_the_option_names():
+    module = FakeModule(join_rc=0)
+    out = samba_join_sssd.SambaJoinSssdIO(module=module).join(_join_params(keytab="/var/lib/sss/keytabs/host.keytab"))
+    assert "--host-keytab=/var/lib/sss/keytabs/host.keytab" in module.commands[0][0]
+    assert out["keytab"] == "/var/lib/sss/keytabs/host.keytab"
 
 
 def test_io_join_omits_unset_optional_flags():

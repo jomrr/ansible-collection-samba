@@ -1,0 +1,6 @@
+---
+minor_changes:
+  - >-
+    samba_join_sssd - new option C(keytab) (default C(/etc/krb5.keytab)) names
+    the host keytab C(adcli) writes (C(--host-keytab)) and the module reads the
+    join state from; previously the path was fixed.

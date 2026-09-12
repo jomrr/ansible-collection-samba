@@ -12,8 +12,9 @@ short_description: Join a host to an existing domain via adcli for SSSD
 version_added: 0.1.0
 description:
   - Join the local host to an existing Active Directory domain using C(adcli),
-    which creates the machine account and writes a Kerberos B(keytab)
-    (C(/etc/krb5.keytab)) that SSSD then uses to authenticate to the domain.
+    which creates the machine account and writes a Kerberos B(keytab) (by
+    default C(/etc/krb5.keytab), see O(keytab)) that SSSD then uses to
+    authenticate to the domain.
   - This is the SSSD branch of the join family. Unlike C(jomrr.samba.samba_join_dc)
     and C(jomrr.samba.samba_join_member) (which use the native C(samba) bindings),
     this module runs the C(adcli) command line tool - there is no Python binding
@@ -83,6 +84,15 @@ options:
       - Override the fully qualified domain name for the machine account. Passed
         to C(adcli --host-fqdn). If omitted, C(adcli) derives it from the host.
     type: str
+  keytab:
+    description:
+      - The Kerberos keytab C(adcli) writes the host credentials to and the
+        module reads the join state from. Passed to C(adcli --host-keytab).
+      - SSSD reads C(/etc/krb5.keytab) unless its C(krb5_keytab) setting says
+        otherwise, so change this only together with that setting.
+    type: path
+    default: /etc/krb5.keytab
+    version_added: 2.0.0
   force:
     description:
       - Join again even though the keytab already holds a machine principal
@@ -173,8 +183,8 @@ from ansible.module_utils.common.text.converters import to_native
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_sssd_logic as logic
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_keytab
 
-#: adcli's default host keytab (used when --host-keytab is not overridden).
-KEYTAB_PATH = "/etc/krb5.keytab"
+#: adcli's and SSSD's default host keytab; the ``keytab`` option's default.
+DEFAULT_KEYTAB = "/etc/krb5.keytab"
 
 
 def is_machine_principal(components):
@@ -207,31 +217,33 @@ class SambaJoinSssdIO:
             )
         return adcli
 
-    def read_state(self):
+    def read_state(self, params):
         """Return the join identity if joined, else None.
 
-        The decision is local: the keytab adcli writes holds the host's machine
-        principals for the realm (``host/<fqdn>`` and ``<NAME>$``). No DC is
-        contacted, so an unreachable or degraded DC can never look like "not
-        joined" and trigger a re-join. A missing keytab means "not joined"; an
-        unreadable or malformed one is a clear error.
+        The decision is local: the keytab named by ``keytab`` (the one adcli
+        writes) holds the host's machine principals for the realm
+        (``host/<fqdn>`` and ``<NAME>$``). No DC is contacted, so an
+        unreachable or degraded DC can never look like "not joined" and trigger
+        a re-join. A missing keytab means "not joined"; an unreadable or
+        malformed one is a clear error.
         """
-        realm = self.module.params["realm"]
+        realm = params["realm"]
+        keytab = params["keytab"]
         try:
-            principals = samba_keytab.read_principals(KEYTAB_PATH)
+            principals = samba_keytab.read_principals(keytab)
         except FileNotFoundError:
             return None
         except OSError as err:
-            raise logic.SambaJoinSssdError("cannot read %s: %s" % (KEYTAB_PATH, to_native(err)))
+            raise logic.SambaJoinSssdError("cannot read %s: %s" % (keytab, to_native(err)))
         except samba_keytab.KeytabError as err:
-            raise logic.SambaJoinSssdError("cannot parse %s: %s" % (KEYTAB_PATH, to_native(err)))
+            raise logic.SambaJoinSssdError("cannot parse %s: %s" % (keytab, to_native(err)))
         joined = any(
             keytab_realm.upper() == realm.upper() and is_machine_principal(components)
             for keytab_realm, components in principals
         )
         if not joined:
             return None
-        return {"realm": realm, "keytab": KEYTAB_PATH}
+        return {"realm": realm, "keytab": keytab}
 
     def join(self, params):
         """Join the host with ``adcli join`` and return its non-secret identity.
@@ -247,6 +259,7 @@ class SambaJoinSssdIO:
             "join",
             "--domain=%s" % params["realm"],
             "--login-user=%s" % params["bind_username"],
+            "--host-keytab=%s" % params["keytab"],
             "--stdin-password",
         ]
         if params.get("server"):
@@ -263,7 +276,7 @@ class SambaJoinSssdIO:
             raise logic.SambaJoinSssdError(
                 "adcli join failed (rc=%d): %s" % (rc, to_native(err).strip())
             )
-        return {"realm": params["realm"], "keytab": KEYTAB_PATH}
+        return {"realm": params["realm"], "keytab": params["keytab"]}
 
 
 def main():
@@ -275,6 +288,7 @@ def main():
         bind_password=dict(type="str", no_log=True),
         computer_ou=dict(type="str"),
         host_fqdn=dict(type="str"),
+        keytab=dict(type="path", default=DEFAULT_KEYTAB),
         force=dict(type="bool", default=False),
         state=dict(type="str", default="present", choices=["present"]),
     )

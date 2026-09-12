@@ -308,7 +308,7 @@ tool (there is no Python binding for it): the join password is fed to `adcli` on
 - The **lifecycle modules** (`samba_provision`, the join modules) run locally on
   the target machine and write local secret stores — the directory database
   (`sam.ldb`), the machine secret (`secrets.tdb`) or a Kerberos keytab
-  (`/etc/krb5.keytab`). Protecting those files with the host's normal filesystem
+  (`/etc/krb5.keytab` by default). Protecting those files with the host's normal filesystem
   permissions is the host's responsibility, outside the module's scope (the
   modules perform only the provision/join act).
 

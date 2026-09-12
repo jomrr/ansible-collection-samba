@@ -184,3 +184,54 @@
         that:
           - _sssctl.rc == 0
           - samba_rfc_user in _sssctl.stdout
+
+    # --- the keytab option: adcli --host-keytab and the state read from that
+    # file. Last on purpose: the re-join rotates the machine password into the
+    # alternative keytab, so /etc/krb5.keytab (which SSSD above used) goes stale.
+    - name: Verify | A forced re-join into an alternative keytab honours the keytab option
+      jomrr.samba.samba_join_sssd:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        keytab: /root/alt.keytab
+        force: true
+        state: present
+      register: _alt
+
+    - name: Verify | The alternative keytab was written
+      ansible.builtin.stat:
+        path: /root/alt.keytab
+      register: _alt_keytab
+
+    - name: Verify | The join state is read from the alternative keytab (joined, no-op)
+      jomrr.samba.samba_join_sssd:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        keytab: /root/alt.keytab
+        state: present
+      check_mode: true
+      register: _alt_check
+
+    - name: Verify | A keytab without a principal for the realm reads as not joined
+      jomrr.samba.samba_join_sssd:
+        realm: "{{ samba_realm }}"
+        server: "{{ target_dc }}.{{ samba_realm | lower }}"
+        bind_username: Administrator
+        bind_password: "{{ samba_admin_password }}"
+        keytab: /root/missing.keytab
+        state: present
+      check_mode: true
+      register: _missing_check
+
+    - name: Verify | The keytab option steers both the join and the state read
+      ansible.builtin.assert:
+        that:
+          - _alt is changed
+          - _alt.domain.keytab == "/root/alt.keytab"
+          - _alt_keytab.stat.exists
+          - _alt_check is not changed
+          - _alt_check.joined is true
+          - _missing_check is changed
+          - _missing_check.joined is false

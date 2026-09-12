@@ -29,11 +29,13 @@ class SambaJoinSssdError(Exception):
 def run(params, check_mode, io):
     """Orchestrate the binary adcli-join decision.
 
-    ``io`` provides ``read_state`` (``None`` when the host is not joined, a dict
-    ``{"realm", "keytab"}`` when it is; decided from the local keytab) and
-    ``join`` (runs ``adcli join``, returning the non-secret result, raising
-    :class:`SambaJoinSssdError` when ``adcli`` itself is missing). Injecting it
-    keeps this function testable without adcli.
+    ``io`` provides ``read_state(params)`` (``None`` when the host is not
+    joined, a dict ``{"realm", "keytab"}`` when it is; decided from the keytab
+    ``params["keytab"]`` names, for ``params["realm"]``) and ``join(params)``
+    (runs ``adcli join``, returning the non-secret result, raising
+    :class:`SambaJoinSssdError` when ``adcli`` itself is missing). Both get the
+    module parameters handed in; injecting the I/O keeps this function testable
+    without adcli.
 
     ``state`` is always ``present``. The cases:
       * already joined and not ``force`` -> idempotent no-op.
@@ -41,6 +43,6 @@ def run(params, check_mode, io):
     The decision is the shared :func:`samba_lifecycle_logic.ensure`.
     """
     return lifecycle.ensure(
-        io.read_state(), params, check_mode, io.join, SambaJoinSssdError,
+        io.read_state(params), params, check_mode, io.join, SambaJoinSssdError,
         flag="joined", secret="bind_password", action="join a domain",
     )
