@@ -9,7 +9,11 @@
 #
 # /var/lib/samba is a per-run tmpfs: it lives in the container's own mount
 # namespace, where the native security.NTACL xattr is writable, and gives each
-# run a clean, disposable domain.
+# run a clean, disposable domain. It is given as `extra_opts: ["--tmpfs", ...]`
+# (podman run options) and not via the driver's `tmpfs` key: molecule-plugins
+# 26.7 validates that key as a list of strings but hands it unchanged to
+# podman_container, whose tmpfs is a dict, so no value passes both. The same
+# applies to the other scenarios.
 
 driver:
   name: podman
@@ -19,26 +23,22 @@ platforms:
     image: docker.io/debian:stable
     pre_build_image: true
     privileged: true
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: samba-fedora
     image: docker.io/fedora:latest
     pre_build_image: true
     privileged: true
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: samba-opensuse
     image: docker.io/opensuse/tumbleweed:latest
     pre_build_image: true
     privileged: true
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: samba-ubuntu
     image: docker.io/ubuntu:latest
     pre_build_image: true
     privileged: true
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
 
 provisioner:
   name: ansible

@@ -25,26 +25,22 @@ platforms:
     image: docker.io/debian:stable
     pre_build_image: true
     privileged: true
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: prov-fedora
     image: docker.io/fedora:latest
     pre_build_image: true
     privileged: true
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: prov-opensuse
     image: docker.io/opensuse/tumbleweed:latest
     pre_build_image: true
     privileged: true
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: prov-ubuntu
     image: docker.io/ubuntu:latest
     pre_build_image: true
     privileged: true
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
 
 provisioner:
   name: ansible

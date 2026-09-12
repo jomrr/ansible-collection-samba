@@ -38,8 +38,7 @@ platforms:
     privileged: true
     network: jomrr-join-sssd
     groups: [dc]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: sc-deb
     image: docker.io/debian:stable
     pre_build_image: true
@@ -53,8 +52,7 @@ platforms:
     privileged: true
     network: jomrr-join-sssd
     groups: [dc]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: sc-fed
     image: docker.io/fedora:latest
     pre_build_image: true
@@ -68,8 +66,7 @@ platforms:
     privileged: true
     network: jomrr-join-sssd
     groups: [dc]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: sc-suse
     image: docker.io/opensuse/tumbleweed:latest
     pre_build_image: true
@@ -83,8 +80,7 @@ platforms:
     privileged: true
     network: jomrr-join-sssd
     groups: [dc]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: sc-ubu
     image: docker.io/ubuntu:latest
     pre_build_image: true

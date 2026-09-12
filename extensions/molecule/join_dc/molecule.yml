@@ -36,16 +36,14 @@ platforms:
     privileged: true
     network: jomrr-join-dc
     groups: [dc]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: jn-deb
     image: docker.io/debian:stable
     pre_build_image: true
     privileged: true
     network: jomrr-join-dc
     groups: [joiner]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   # --- pair: fedora ---
   - name: dc-fed
     image: docker.io/debian:stable
@@ -53,16 +51,14 @@ platforms:
     privileged: true
     network: jomrr-join-dc
     groups: [dc]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: jn-fed
     image: docker.io/fedora:latest
     pre_build_image: true
     privileged: true
     network: jomrr-join-dc
     groups: [joiner]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   # --- pair: opensuse ---
   - name: dc-suse
     image: docker.io/debian:stable
@@ -70,16 +66,14 @@ platforms:
     privileged: true
     network: jomrr-join-dc
     groups: [dc]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: jn-suse
     image: docker.io/opensuse/tumbleweed:latest
     pre_build_image: true
     privileged: true
     network: jomrr-join-dc
     groups: [joiner]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   # --- pair: ubuntu ---
   - name: dc-ubu
     image: docker.io/debian:stable
@@ -87,16 +81,14 @@ platforms:
     privileged: true
     network: jomrr-join-dc
     groups: [dc]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
   - name: jn-ubu
     image: docker.io/ubuntu:latest
     pre_build_image: true
     privileged: true
     network: jomrr-join-dc
     groups: [joiner]
-    tmpfs:
-      /var/lib/samba: "rw,size=1g,mode=0755"
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
 
 provisioner:
   name: ansible
