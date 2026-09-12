@@ -5,7 +5,8 @@ native `samba` Python bindings (`samba.samdb.SamDB`, `samba.join`,
 `samba.net_s3`, `samba.dcerpc`):
 
 - **Object management** on a running DC — users, groups, organizational units,
-  and the Samba internal DNS.
+  the domain password policy and fine-grained password settings, and the Samba
+  internal DNS.
 - **Domain lifecycle** — provisioning a new domain controller and joining a host
   to an existing domain (as a DC, a Samba member server, or an SSSD client).
 
@@ -34,6 +35,8 @@ setup).
 | `samba_dns_record_info` | Query DNS records | n/a (read) | n/a |
 | `samba_dns_zone` | Create and remove AD-integrated DNS zones (forward/reverse) | yes | yes |
 | `samba_dns_zone_info` | Query DNS zones | n/a (read) | n/a |
+| `samba_password_policy` | Manage the domain password policy (length, history, ages, lockout, complexity) | yes | yes |
+| `samba_password_settings` | Manage fine-grained password settings objects (PSOs) and their subjects | yes | yes |
 
 ### Domain lifecycle modules
 

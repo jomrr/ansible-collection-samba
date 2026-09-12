@@ -504,3 +504,57 @@ correcting the earlier "`backend` matters at the module level" finding - the
 family is cut by mechanism into `samba_join_member` (net_s3 → secrets.tdb) and
 `samba_join_sssd` (adcli → keytab) with **no** `samba_join_client`/`backend`
 switch (see "the cut" above).
+
+---
+
+## Password policy modules (samba_password_policy / samba_password_settings)
+
+### Context
+
+The domain password policy is a set of attributes on the domain object
+(`minPwdLength`, `pwdHistoryLength`, the ages and lockout timers as negative
+100-nanosecond ticks, the two booleans as bits of `pwdProperties`); a
+fine-grained policy is a `msDS-PasswordSettings` object (PSO) below
+`CN=Password Settings Container,CN=System` with its own `msDS-*` attributes, a
+precedence and the subjects it applies to. `samba-tool domain passwordsettings`
+manages both. Requested by the maintainer (2026-09-12) from an example
+implementation; the decisions below are that example's, adapted to this
+collection's layering.
+
+### Decision
+
+- **Two object modules**, `samba_password_policy` (the domain's policy, a
+  singleton) and `samba_password_settings` (one PSO, `state` present/absent),
+  sharing the `settings` option through the `jomrr.samba.password_settings`
+  doc fragment, the connection layer, and one logic and one I/O module
+  (`samba_password_policy_logic`, `samba_password_policy_io`, the latter a
+  `SambaObjectIO`). Both are in the `jomrr.samba.all` action group.
+- **Only what is given is managed.** The domain policy changes the settings
+  given and preserves every other bit of `pwdProperties`. A new PSO copies
+  the settings not given from the domain policy (what `samba-tool ... pso
+  create` does; the attributes are mandatory), an existing PSO keeps its own.
+  `applies_to` is the exact set of subjects (users and global security
+  groups, by `sAMAccountName` or DN); an empty list removes every assignment.
+- **Encoding mirrors samba-tool, verified against samba 4.24.6** (`netcmd/pso.py`,
+  `netcmd/domain/passwordsettings.py`): ticks are `-(value * unit)`;
+  `maximum_age_days` 0 is NEVER (-2^63) for the domain and for PSOs; the
+  domain's lockout duration and window at 0 are NEVER too ("until an
+  administrator unlocks"), a PSO stores 0 for them, and a PSO inheriting a
+  NEVER lockout timer from the domain gets 0. Reading maps NEVER to 0 and a
+  whole number of units to an `int`.
+- **One write per object**: the changed attributes go in a single modify (or
+  the add); check mode computes the same diff without writing. Validation
+  stays with what the example had (no negative values, minimum age below
+  maximum age unless the maximum is 0); everything else the DC refuses is
+  reported through the shared error mapping.
+- No `_info` modules for now: the modules' own return values (`settings`,
+  `applies_to`, `precedence`) are the read path, and `samba-tool` remains the
+  independent cross-check in the integration test.
+
+### Status
+
+Implemented with unit tests (logic and I/O) and covered in the default
+Molecule scenario: the domain policy is tightened, a PSO with two subjects and
+one inheriting every setting are created, a seeded PSO is removed, and
+`samba-tool domain passwordsettings show` / `pso show` confirm what the modules
+wrote.

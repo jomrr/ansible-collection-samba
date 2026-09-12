@@ -487,3 +487,44 @@
       jomrr.samba.samba_dns_zone:
         name: zghost.example.com
         state: absent
+
+    # --- password policy and fine-grained password settings ---
+    # Last on purpose: the domain policy applies to every password set after
+    # it. The values stay compatible with the fixture password used above.
+    - name: Converge | Tighten the domain password policy (history, age, lockout timers)
+      jomrr.samba.samba_password_policy:
+        settings:
+          minimum_length: 8
+          history_length: 12
+          maximum_age_days: 90
+          lockout_duration_minutes: 45
+          lockout_window_minutes: 45
+
+    - name: Converge | Create a fine-grained policy for a group and a user
+      jomrr.samba.samba_password_settings:
+        name: admins_pso
+        precedence: 10
+        applies_to:
+          - engineers
+          - jane
+        settings:
+          minimum_length: 16
+          complexity: true
+          reversible_encryption: false
+        state: present
+
+    - name: Converge | Create a fine-grained policy that inherits every setting from the domain
+      jomrr.samba.samba_password_settings:
+        name: inherit_pso
+        precedence: 20
+        state: present
+
+    - name: Converge | Remove a seeded fine-grained policy
+      jomrr.samba.samba_password_settings:
+        name: todelete_pso
+        state: absent
+
+    - name: Converge | Absent on a non-existent fine-grained policy is a no-op
+      jomrr.samba.samba_password_settings:
+        name: ghost_pso
+        state: absent

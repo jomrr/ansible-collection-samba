@@ -320,6 +320,12 @@
             path: "{{ samba_base_dn }}"
             state: present
 
+        - name: Prepare | seed | fine-grained password policy converge will delete
+          jomrr.samba.samba_password_settings:
+            name: todelete_pso
+            precedence: 30
+            state: present
+
         - name: Prepare | seed | OUs for the move tests
           jomrr.samba.samba_ou:
             name: "{{ item }}"

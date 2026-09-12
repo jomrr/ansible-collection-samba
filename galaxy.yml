@@ -6,8 +6,8 @@ authors:
   - Jonas Mauer
 description: >-
   Provision Samba AD domain controllers, join hosts to a domain (DC, member
-  server, SSSD) and manage users, groups, OUs, DNS zones and records via the
-  native Python bindings.
+  server, SSSD) and manage users, groups, OUs, password policies, DNS zones
+  and records via the native Python bindings.
 license_file: LICENSE
 tags:
   - samba

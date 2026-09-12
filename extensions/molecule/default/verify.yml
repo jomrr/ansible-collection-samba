@@ -530,3 +530,93 @@
         that:
           - _leak_probe.users | length == 1
           - _ccache_files.files | length == 0
+
+    # --- password policy and PSOs: the module's own no-op re-run reads the
+    # state back; samba-tool cross-checks it independently.
+    - name: Verify | Re-run the domain password policy (no-op) to read it back
+      jomrr.samba.samba_password_policy:
+        settings:
+          minimum_length: 8
+          history_length: 12
+          maximum_age_days: 90
+          lockout_duration_minutes: 45
+          lockout_window_minutes: 45
+      register: _policy
+
+    - name: Verify | samba-tool shows the domain policy the module set
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - domain
+          - passwordsettings
+          - show
+      register: _policy_show
+      changed_when: false
+
+    - name: Verify | The domain policy matches and samba-tool agrees
+      ansible.builtin.assert:
+        that:
+          - _policy is not changed
+          - _policy.settings.minimum_length == 8
+          - _policy.settings.history_length == 12
+          - _policy.settings.maximum_age_days == 90
+          - _policy.settings.lockout_duration_minutes == 45
+          - _policy.settings.lockout_window_minutes == 45
+          - _policy.settings.complexity is true
+          - "'Password history length: 12' in _policy_show.stdout"
+          - "'Maximum password age (days): 90' in _policy_show.stdout"
+          - "'Account lockout duration (mins): 45' in _policy_show.stdout"
+          - "'Reset account lockout after (mins): 45' in _policy_show.stdout"
+
+    - name: Verify | Re-run the fine-grained policy (no-op) to read it back
+      jomrr.samba.samba_password_settings:
+        name: admins_pso
+        precedence: 10
+        applies_to:
+          - engineers
+          - jane
+        settings:
+          minimum_length: 16
+          complexity: true
+          reversible_encryption: false
+        state: present
+      register: _pso
+
+    - name: Verify | samba-tool shows the PSO the module created
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - domain
+          - passwordsettings
+          - pso
+          - show
+          - admins_pso
+      register: _pso_show
+      changed_when: false
+
+    - name: Verify | The PSO matches, applies to both subjects and inherited the domain's history length
+      ansible.builtin.assert:
+        that:
+          - _pso is not changed
+          - _pso.precedence == 10
+          - _pso.settings.minimum_length == 16
+          - _pso.settings.history_length == 12
+          - _pso.applies_to | length == 2
+          - _pso.applies_to | join(' ') | lower is search('cn=engineers')
+          - _pso.applies_to | join(' ') | lower is search('cn=jane')
+          - "'Precedence (lowest is best): 10' in _pso_show.stdout"
+          - "'Minimum password length: 16' in _pso_show.stdout"
+          - "'PSO applies directly to 2 groups/users' in _pso_show.stdout"
+
+    - name: Verify | samba-tool no longer finds the removed PSO
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - domain
+          - passwordsettings
+          - pso
+          - show
+          - todelete_pso
+      register: _pso_gone
+      changed_when: false
+      failed_when: _pso_gone.rc == 0
