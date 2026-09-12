@@ -73,8 +73,16 @@ promote: ## Merge dev into main, push, and return to dev
 # Requires GH_TOKEN in the environment and being on the main branch (PSR only
 # releases from the main/master group). PSR bumps galaxy.yml, builds, tags and
 # creates the GitHub release; CHANGELOG.rst stays antsibull-changelog's.
-release: ## Cut a release locally (semantic-release; needs GH_TOKEN, on main)
+# The release commit lands on main only, so dev is fast-forwarded to main
+# afterwards; otherwise the next `make promote` cannot fast-forward. Right
+# after a promote dev has no commits of its own, so --ff-only succeeds; if
+# work continued on dev meanwhile it fails and the divergence is surfaced,
+# as in promote (the release itself is complete at that point).
+release: ## Cut a release on main, then fast-forward dev to it (needs GH_TOKEN)
 	semantic-release version --no-changelog && semantic-release publish
+	git checkout dev
+	git merge --ff-only main
+	git push origin dev
 
 release-dry: ## Compute the next version without committing, tagging or releasing
 	semantic-release --noop version --no-changelog
