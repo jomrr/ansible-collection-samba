@@ -131,7 +131,8 @@ def test_invalid_path_raises_clean():
 
 
 def test_parent_exists_true_and_false():
-    assert make_io(FakeSamDB(search_result=["present"])).parent_exists("OU=Staff,DC=example,DC=com") is True
+    present = FakeSamDB(search_result=[FakeMessage(dn="OU=Staff,DC=example,DC=com")])
+    assert make_io(present).parent_exists("OU=Staff,DC=example,DC=com") is True
     samdb = FakeSamDB(search_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
     assert make_io(samdb).parent_exists("OU=Missing,DC=example,DC=com") is False
 

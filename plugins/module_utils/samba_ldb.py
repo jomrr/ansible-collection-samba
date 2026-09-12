@@ -82,16 +82,25 @@ def same_parent(samdb, object_dn, parent_dn):
     return parse_dn(samdb, object_dn).parent() == parent_dn
 
 
-def dn_exists(samdb, dn):
-    """True if ``dn`` exists in the directory."""
+def lookup_dn(samdb, dn):
+    """Return the directory's own spelling of ``dn``, or None if it does not exist.
+
+    A base-scoped read; the one attribute requested keeps it light (over LDAP an
+    empty attribute list means "all").
+    """
     ldb = load_ldb()
     try:
-        samdb.search(base=dn, scope=ldb.SCOPE_BASE, attrs=[])
-        return True
+        res = samdb.search(base=dn, scope=ldb.SCOPE_BASE, attrs=["distinguishedName"])
     except ldb.LdbError as err:
         if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-            return False
+            return None
         raise
+    return str(res[0].dn) if len(res) else None
+
+
+def dn_exists(samdb, dn):
+    """True if ``dn`` exists in the directory."""
+    return lookup_dn(samdb, dn) is not None
 
 
 def reparent_dn(samdb, object_dn, parent_dn):

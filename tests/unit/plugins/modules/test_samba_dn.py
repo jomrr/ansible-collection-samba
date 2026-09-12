@@ -11,6 +11,8 @@ string comparison, and that names are escaped via ``set_component``."""
 
 from __future__ import annotations
 
+import types
+
 import pytest
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
@@ -99,7 +101,8 @@ class FakeSamDB:
     def search(self, base, scope, attrs):
         if self.search_error is not None:
             raise self.search_error
-        return [object()]
+        # The directory answers with its own spelling of the DN.
+        return [types.SimpleNamespace(dn=FakeDn(str(base).replace("ou=eng", "OU=Eng")))]
 
     def rename(self, old_dn, new_dn):
         if self.rename_error is not None:
@@ -144,6 +147,12 @@ def test_dn_exists_true_and_false():
     assert samba_ldb.dn_exists(FakeSamDB(), FakeLdb().Dn(None, "OU=Eng,DC=example,DC=com")) is True
     samdb = FakeSamDB(search_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
     assert samba_ldb.dn_exists(samdb, FakeLdb().Dn(None, "OU=Missing,DC=example,DC=com")) is False
+
+
+def test_lookup_dn_returns_the_directory_spelling_or_none():
+    assert samba_ldb.lookup_dn(FakeSamDB(), FakeLdb().Dn(None, "ou=eng,DC=example,DC=com")) == "OU=Eng,DC=example,DC=com"
+    samdb = FakeSamDB(search_error=FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "gone"))
+    assert samba_ldb.lookup_dn(samdb, FakeLdb().Dn(None, "OU=Missing,DC=example,DC=com")) is None
 
 
 # --- the container newuser/newgroup take: path relative to the domain ---

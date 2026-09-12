@@ -220,6 +220,22 @@
         or 'nosuchuser1' not in _badmembers.msg
         or 'nosuchuser2' not in _badmembers.msg
 
+    # The read mirror: samba_group_info returns member DNs, samba_group takes
+    # them back as members - authoritatively, and nothing may change.
+    - name: Converge | Read a group's members back as DNs
+      jomrr.samba.samba_group_info:
+        name: engineers
+      register: _engineers_read
+
+    - name: Converge | Feeding the member DNs back into samba_group is a no-op (read mirror)
+      jomrr.samba.samba_group:
+        name: engineers
+        members: "{{ _engineers_read.groups[0].members }}"
+        members_purge: true
+        state: present
+      register: _mirror
+      failed_when: _mirror is changed
+
     - name: Converge | Create a top-level OU
       jomrr.samba.samba_ou:
         name: department

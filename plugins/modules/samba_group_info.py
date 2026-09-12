@@ -18,6 +18,9 @@ description:
     (C(samba.samdb.SamDB)), not through C(samba-tool) subprocesses.
   - This module is read-only; it never changes the directory and always reports
     C(changed=false).
+  - The returned member DNs can be fed back as I(members) of
+    M(jomrr.samba.samba_group), so a group's membership can be read, filtered
+    and written back.
 author:
   - Jonas Mauer (@jomrr)
 requirements:
@@ -101,7 +104,10 @@ groups:
       type: int
       sample: 10000
     members:
-      description: The distinguished names of the group members.
+      description:
+        - The distinguished names of the group members.
+        - M(jomrr.samba.samba_group) accepts them as I(members), so they can be
+          fed back unchanged.
       returned: always
       type: list
       elements: str

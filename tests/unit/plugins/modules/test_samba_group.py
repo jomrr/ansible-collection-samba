@@ -34,9 +34,10 @@ class FakeIO:
         self.calls.append(("rfc2307_provisioned",))
         return self.provisioned
 
-    def resolve_members(self, names):
-        self.calls.append(("resolve_members", list(names)))
-        return [member_dn(name) for name in names]
+    def resolve_members(self, members):
+        self.calls.append(("resolve_members", list(members)))
+        # Like the I/O: a DN (contains "=") is taken as is, a name is resolved.
+        return [member if "=" in member else member_dn(member) for member in members]
 
     def create_group(self, name, group_type_value, description, path, gid_number):
         self.calls.append(("create_group", name, group_type_value, description, path, gid_number))
@@ -191,6 +192,15 @@ def test_members_authoritative_removes_unlisted():
 def test_members_no_change_is_idempotent():
     fake = FakeIO(current=existing_group(members=[member_dn("jdoe")]))
     result = logic.run(make_params(members=["jdoe"], members_purge=True), False, fake)
+    assert result["changed"] is False
+    assert "add_member" not in call_names(fake)
+    assert "remove_member" not in call_names(fake)
+
+
+def test_members_given_as_dns_are_the_read_mirror():
+    # samba_group_info returns DNs; feeding them back must be a no-op.
+    fake = FakeIO(current=existing_group(members=[member_dn("jdoe")]))
+    result = logic.run(make_params(members=[member_dn("jdoe")], members_purge=True), False, fake)
     assert result["changed"] is False
     assert "add_member" not in call_names(fake)
     assert "remove_member" not in call_names(fake)

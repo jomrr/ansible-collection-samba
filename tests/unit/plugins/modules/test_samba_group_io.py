@@ -38,6 +38,7 @@ class FakeMessage:
 class FakeLdb:
     """Provides the symbols SambaGroupIO uses; records escaping calls."""
 
+    SCOPE_BASE = 0
     SCOPE_SUBTREE = 2
     FLAG_MOD_ADD = 1
     FLAG_MOD_REPLACE = 2
@@ -61,6 +62,8 @@ class FakeLdb:
         return FakeMessage()
 
     def Dn(self, samdb, dn):
+        if "INVALID" in dn:
+            raise ValueError("not a valid dn")
         return ("DN", dn)
 
     def MessageElement(self, value, flag, name):
@@ -70,8 +73,10 @@ class FakeLdb:
 class FakeSamDB:
     """Configurable fake SamDB; *_error inject errors for the race tests."""
 
-    def __init__(self, search_result=None, newgroup_error=None, modify_error=None, delete_error=None):
+    def __init__(self, search_result=None, newgroup_error=None, modify_error=None, delete_error=None, lookups=None):
         self.search_result = [] if search_result is None else search_result
+        #: Base-scoped reads: DN text -> messages; a DN not listed does not exist.
+        self.lookups = lookups or {}
         self.newgroup_error = newgroup_error
         self.modify_error = modify_error
         self.delete_error = delete_error
@@ -84,9 +89,13 @@ class FakeSamDB:
     def domain_dn(self):
         return "DC=example,DC=com"
 
-    def search(self, base, scope, expression, attrs):
+    def search(self, base, scope, expression=None, attrs=None):
         self.captured = {"base": base, "scope": scope, "expression": expression, "attrs": attrs}
         self.searches.append(self.captured)
+        if scope == FakeLdb.SCOPE_BASE:
+            if base[1] not in self.lookups:
+                raise FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "no such object")
+            return self.lookups[base[1]]
         return self.search_result
 
     def newgroup(self, name, groupou=None, grouptype=None, description=None, gidnumber=None):
@@ -163,6 +172,32 @@ def test_resolve_members_reports_every_missing_name_at_once():
         make_io(samdb).resolve_members(["jdoe", "ghost1", "ghost2"])
     assert "ghost1" in str(raised.value)
     assert "ghost2" in str(raised.value)
+
+
+def test_resolve_members_takes_dns_in_the_directory_spelling():
+    # A DN (samba_group_info's output) is looked up once, base-scoped, and
+    # returned as the directory spells it; a name still goes through the search.
+    samdb = FakeSamDB(
+        search_result=[_account("jdoe", "CN=jdoe,DC=example,DC=com")],
+        lookups={"cn=other, ou=eng,dc=example,dc=com": [FakeMessage(dn="CN=Other,OU=Eng,DC=example,DC=com")]},
+    )
+    dns = make_io(samdb).resolve_members(["cn=other, ou=eng,dc=example,dc=com", "jdoe"])
+    assert dns == ["CN=Other,OU=Eng,DC=example,DC=com", "CN=jdoe,DC=example,DC=com"]
+    scopes = [search["scope"] for search in samdb.searches]
+    assert scopes.count(FakeLdb.SCOPE_BASE) == 1
+    assert scopes.count(FakeLdb.SCOPE_SUBTREE) == 1
+
+
+def test_resolve_members_reports_a_missing_dn_like_a_missing_name():
+    samdb = FakeSamDB(search_result=[_account("jdoe", "CN=jdoe,DC=example,DC=com")])
+    with pytest.raises(logic.SambaGroupError) as raised:
+        make_io(samdb).resolve_members(["jdoe", "CN=Ghost,DC=example,DC=com"])
+    assert "CN=Ghost,DC=example,DC=com" in str(raised.value)
+
+
+def test_resolve_members_rejects_a_malformed_dn():
+    with pytest.raises(logic.SambaGroupError):
+        make_io(FakeSamDB()).resolve_members(["INVALID=DN"])
 
 
 def test_resolve_members_batches_large_lists(monkeypatch):

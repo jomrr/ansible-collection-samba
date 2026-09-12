@@ -312,7 +312,7 @@ class ExistsSamDB:
         self.searched.append((base, scope))
         if not self.exists:
             raise FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "no such object")
-        return ["present"]
+        return [FoundMessage({}, "CN=ypServ30,CN=RpcServices,CN=System,DC=example,DC=com")]
 
 
 def test_rfc2307_provisioned_true(monkeypatch):

@@ -70,8 +70,12 @@ options:
     type: int
   members:
     description:
-      - Members of the group, given by their C(sAMAccountName) (users, groups
-        or computers). The module resolves each name to its DN.
+      - Members of the group, each given by its C(sAMAccountName) (users,
+        groups or computers) or by its distinguished name (any value that
+        contains C(=), which a C(sAMAccountName) cannot). Names are resolved
+        to DNs; DNs are checked to exist.
+      - M(jomrr.samba.samba_group_info) returns members as distinguished
+        names, so its output can be fed back here unchanged.
       - If omitted, membership is not managed at all.
       - See I(members_purge) for additive versus authoritative behaviour.
     type: list
@@ -259,20 +263,37 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
     #: list bounded.
     _RESOLVE_BATCH = 200
 
-    def resolve_members(self, names):
-        """Resolve member sAMAccountNames to DNs with one search per batch.
+    def resolve_members(self, members):
+        """Resolve member references to DNs.
 
-        An OR filter over the batch (every name escaped) replaces one search per
-        member. The DNs come back in the order given; names that do not exist
-        are reported together in one error. sAMAccountName matches
-        case-insensitively, so results are mapped back by lower-cased name,
-        which is why that attribute (and only it) is requested.
+        A member is a sAMAccountName or, when it contains ``=`` (a character a
+        sAMAccountName cannot hold), a distinguished name - the form
+        samba_group_info returns, so its output can be fed back. Names are
+        resolved with one search per batch (an OR filter, every name escaped)
+        instead of one per member; DNs are checked with one base-scoped read
+        each and taken in the directory's own spelling. The DNs come back in
+        the order given; members that do not exist are reported together in
+        one error. sAMAccountName matches case-insensitively, so results are
+        mapped back by lower-cased name, which is why that attribute (and only
+        it) is requested.
         """
         ldb = samba_ldb.load_ldb()
-        wanted = list(dict.fromkeys(names))
+        wanted = list(dict.fromkeys(members))
         found = {}
-        for start in range(0, len(wanted), self._RESOLVE_BATCH):
-            batch = wanted[start:start + self._RESOLVE_BATCH]
+        names = []
+        for member in wanted:
+            if "=" not in member:
+                names.append(member)
+                continue
+            try:
+                dn = samba_ldb.parse_dn(self.samdb, member)
+            except ValueError:
+                raise logic.SambaGroupError("member '%s' is not a valid distinguished name" % member)
+            stored = samba_ldb.lookup_dn(self.samdb, dn)
+            if stored is not None:
+                found[member.lower()] = stored
+        for start in range(0, len(names), self._RESOLVE_BATCH):
+            batch = names[start:start + self._RESOLVE_BATCH]
             expression = "(|%s)" % "".join(
                 "(sAMAccountName=%s)" % ldb.binary_encode(member) for member in batch
             )
@@ -288,7 +309,7 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
         missing = [member for member in wanted if member.lower() not in found]
         if missing:
             raise logic.SambaGroupError("members not found: %s" % ", ".join(missing))
-        return [found[member.lower()] for member in names]
+        return [found[member.lower()] for member in members]
 
     def create_group(self, name, group_type_value, description, path, gid_number):
         """Create the group with one ``newgroup`` call.
