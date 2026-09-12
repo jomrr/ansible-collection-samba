@@ -437,3 +437,76 @@ def test_move_then_attribute_change_in_order():
     assert result["changed"] is True
     names = call_names(fake)
     assert names.index("move") < names.index("apply_attrs")
+
+
+# --- all-or-nothing create (compensation, since LDAP has no transactions) ---
+
+class _AttrsFailIO(FakeIO):
+    """apply_attrs fails after the object was created."""
+
+    def apply_attrs(self, dn, attr_changes):
+        self.calls.append(("apply_attrs", dn, dict(attr_changes)))
+        raise RuntimeError("0000202F: Constraint violation")
+
+
+def test_create_failure_after_add_removes_the_new_object():
+    fake = _AttrsFailIO(current=None)
+    with pytest.raises(logic.SambaUserError) as excinfo:
+        logic.run(make_params(given_name="Jane", password="S3cret!"), False, fake)
+    names = call_names(fake)
+    assert names.index("create_user") < names.index("delete_user")
+    assert fake.current is None
+    assert "partially created object was removed" in str(excinfo.value)
+    assert "Constraint violation" in str(excinfo.value)
+
+
+def test_create_with_rejected_password_removes_half_created_account():
+    # samba's newuser adds the object first and sets the password second, so a
+    # policy rejection raises after the add and leaves a disabled account.
+    class _WeakPasswordIO(FakeIO):
+        def create_user(self, username, password):
+            FakeIO.create_user(self, username, password)
+            raise RuntimeError("0000052D: Constraint violation - the password is too short")
+
+    fake = _WeakPasswordIO(current=None)
+    with pytest.raises(logic.SambaUserError) as excinfo:
+        logic.run(make_params(password="Weak-Pass-1"), False, fake)
+    assert "delete_user" in call_names(fake)
+    assert fake.current is None
+    assert "removed" in str(excinfo.value)
+    # The cause is reported, the password never is.
+    assert "Weak-Pass-1" not in str(excinfo.value)
+
+
+def test_create_undo_failure_reports_both_errors():
+    class _StuckIO(_AttrsFailIO):
+        def delete_user(self, dn):
+            self.calls.append(("delete_user", dn))
+            raise RuntimeError("busy")
+
+    fake = _StuckIO(current=None)
+    with pytest.raises(logic.SambaUserError) as excinfo:
+        logic.run(make_params(given_name="Jane", password="S3cret!"), False, fake)
+    assert "Constraint violation" in str(excinfo.value)
+    assert "busy" in str(excinfo.value)
+
+
+def test_create_collision_is_not_undone():
+    class _CollisionIO(FakeIO):
+        def create_user(self, username, password):
+            self.calls.append(("create_user", username, password))
+            raise logic.SambaUserError("user 'jdoe' already exists (created concurrently?)")
+
+    fake = _CollisionIO(current=None)
+    with pytest.raises(logic.SambaUserError):
+        logic.run(make_params(password="S3cret!"), False, fake)
+    # The object is somebody else's: never deleted.
+    assert "delete_user" not in call_names(fake)
+
+
+def test_modify_failure_leaves_the_existing_object_alone():
+    fake = _AttrsFailIO(current=existing_user(given_name="Old"))
+    with pytest.raises(RuntimeError):
+        logic.run(make_params(given_name="New"), False, fake)
+    assert "delete_user" not in call_names(fake)
+    assert fake.current is not None

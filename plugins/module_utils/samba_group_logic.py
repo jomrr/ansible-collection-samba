@@ -252,6 +252,31 @@ def build_diff(state, current, desired, planned, member_diff):
     return {"before": before, "after": _effective_state(current, desired, planned, member_diff)}
 
 
+def _undo_create(io, name, exc):
+    """Remove the group a failed create left behind and report the cause.
+
+    LDAP offers no transactions (ldb's LDAP backend implements
+    transaction_start/commit/cancel as no-ops), so a create is made
+    all-or-nothing by compensation: whichever step failed after the initial
+    add (move, gidNumber, membership), the group this run created is deleted
+    again. Only a group that did not exist when the run started reaches this
+    point, so nothing foreign is ever removed.
+    """
+    current = io.read_current(name)
+    if current is None:
+        raise SambaGroupError("creating group '%s' failed: %s" % (name, exc))
+    try:
+        io.delete_group(current["_dn"])
+    except Exception as undo_exc:
+        raise SambaGroupError(
+            "creating group '%s' failed: %s; removing the partially created object failed too: %s"
+            % (name, exc, undo_exc)
+        )
+    raise SambaGroupError(
+        "creating group '%s' failed: %s; the partially created object was removed" % (name, exc)
+    )
+
+
 def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
@@ -331,39 +356,52 @@ def run(params, check_mode, io):
             and not io.parent_exists(path):
         raise SambaGroupError("path '%s' does not exist; create it first" % path)
 
-    if planned["action"] == "create":
-        io.create_group(name, create_group_type(desired), desired.get("description") or None)
+    created = planned["action"] == "create"
+    if created:
+        try:
+            io.create_group(name, create_group_type(desired), desired.get("description") or None)
+        except SambaGroupError:
+            # A concurrent create: the object is not ours, nothing to undo.
+            raise
+        except Exception as exc:
+            _undo_create(io, name, exc)
         current = io.read_current(name)
-
-    if current is None:
-        raise SambaGroupError("group '%s' could not be read back after creation" % name)
+        if current is None:
+            raise SambaGroupError("group '%s' could not be read back after creation" % name)
 
     # Order: move first (so later writes target the final DN), then attributes
-    # and membership.
+    # and membership. Each is its own LDAP operation; on a fresh group a failure
+    # rolls the create back, on an existing group the earlier steps stay
+    # applied and a re-run completes the rest.
     moved = False
-    if io.needs_move(current["_dn"], path):
-        io.move(current["_dn"], path)
-        current = io.read_current(name)
-        moved = True
-
-    if planned["action"] == "modify":
-        if "description" in planned["attr_changes"]:
-            io.set_description(current["_dn"], planned["attr_changes"]["description"])
-        if "group_type" in planned["attr_changes"]:
-            io.set_group_type(current["_dn"], planned["attr_changes"]["group_type"])
-
-    # gidNumber is set via a dedicated modify on both create (newgroup does not
-    # take it) and modify; plan() puts it in attr_changes for both actions.
-    if "gid_number" in planned["attr_changes"]:
-        io.set_gid_number(current["_dn"], planned["attr_changes"]["gid_number"])
-
     member_changed = False
-    for dn in member_diff["adds"]:
-        if io.add_member(current["_dn"], dn):
-            member_changed = True
-    for dn in member_diff["removes"]:
-        if io.remove_member(current["_dn"], dn):
-            member_changed = True
+    try:
+        if io.needs_move(current["_dn"], path):
+            io.move(current["_dn"], path)
+            current = io.read_current(name)
+            moved = True
+
+        if planned["action"] == "modify":
+            if "description" in planned["attr_changes"]:
+                io.set_description(current["_dn"], planned["attr_changes"]["description"])
+            if "group_type" in planned["attr_changes"]:
+                io.set_group_type(current["_dn"], planned["attr_changes"]["group_type"])
+
+        # gidNumber is set via a dedicated modify on both create and modify;
+        # plan() puts it in attr_changes for both actions.
+        if "gid_number" in planned["attr_changes"]:
+            io.set_gid_number(current["_dn"], planned["attr_changes"]["gid_number"])
+
+        for dn in member_diff["adds"]:
+            if io.add_member(current["_dn"], dn):
+                member_changed = True
+        for dn in member_diff["removes"]:
+            if io.remove_member(current["_dn"], dn):
+                member_changed = True
+    except Exception as exc:
+        if created:
+            _undo_create(io, name, exc)
+        raise
 
     # Honest changed: scalar/move changes are real; member ops may have been
     # no-ops due to a concurrent change (handled as idempotent no-ops in the I/O).

@@ -112,6 +112,22 @@
       register: _computer_absent
       failed_when: _computer_absent.changed
 
+    - name: Converge | A create rejected by the password policy leaves no account behind
+      # samba's newuser adds the account, fails on the rejected password and
+      # deletes the account again itself (_CleanUpOnError). The module must
+      # fail cleanly - no traceback - and no account may remain, whether samba
+      # or the module's compensation removed it (verify.yml checks).
+      jomrr.samba.samba_user:
+        username: weakpw
+        given_name: Weak
+        password: x
+        state: present
+      register: _weakpw
+      failed_when: >-
+        _weakpw is not failed
+        or "creating user 'weakpw' failed" not in _weakpw.msg
+        or 'check_password_restrictions' not in _weakpw.msg
+
     - name: Converge | Absent on a non-existent user is a no-op
       jomrr.samba.samba_user:
         username: ghost

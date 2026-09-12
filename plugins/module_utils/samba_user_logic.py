@@ -190,6 +190,33 @@ def check_posix_preconditions(desired, io):
         )
 
 
+def _undo_create(io, username, exc):
+    """Remove the object a failed create left behind and report the cause.
+
+    LDAP offers no transactions (ldb's LDAP backend implements
+    transaction_start/commit/cancel as no-ops), so a create is made
+    all-or-nothing by compensation: whichever step failed after the initial
+    add (move, attributes, enable state), the object this run created is
+    deleted again. Only an object that did not exist when the run started
+    reaches this point, so nothing foreign is ever removed; if the failed step
+    was the add itself, there is nothing to remove and only the cause is
+    reported.
+    """
+    current = io.read_current(username)
+    if current is None:
+        raise SambaUserError("creating user '%s' failed: %s" % (username, exc))
+    try:
+        io.delete_user(current["_dn"])
+    except Exception as undo_exc:
+        raise SambaUserError(
+            "creating user '%s' failed: %s; removing the partially created object failed too: %s"
+            % (username, exc, undo_exc)
+        )
+    raise SambaUserError(
+        "creating user '%s' failed: %s; the partially created object was removed" % (username, exc)
+    )
+
+
 def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
@@ -277,25 +304,42 @@ def run(params, check_mode, io):
             and not io.parent_exists(path):
         raise SambaUserError("path '%s' does not exist; create it first" % path)
 
-    if planned["action"] == "create":
-        io.create_user(username, password)
+    created = planned["action"] == "create"
+    if created:
+        try:
+            io.create_user(username, password)
+        except SambaUserError:
+            # A concurrent create: the object is not ours, nothing to undo.
+            raise
+        except Exception as exc:
+            # samba's newuser cleans up its own password step (it deletes the
+            # account again when setting the password fails), so usually there
+            # is nothing left to undo here; the guard covers whatever remains.
+            _undo_create(io, username, exc)
         current = io.read_current(username)
-
-    if current is None:
-        raise SambaUserError("user '%s' could not be read back after creation" % username)
+        if current is None:
+            raise SambaUserError("user '%s' could not be read back after creation" % username)
 
     # Order: move first (so the later attribute writes target the final DN),
-    # then attributes, enable state and password.
-    if io.needs_move(current["_dn"], path):
-        io.move(current["_dn"], path)
-        current = io.read_current(username)
+    # then attributes, enable state and password. Each is its own LDAP
+    # operation; on a fresh object a failure rolls the create back, on an
+    # existing object the earlier steps stay applied and a re-run completes
+    # the rest.
+    try:
+        if io.needs_move(current["_dn"], path):
+            io.move(current["_dn"], path)
+            current = io.read_current(username)
 
-    if planned["attr_changes"]:
-        io.apply_attrs(current["_dn"], planned["attr_changes"])
-    if planned["enable_change"] is not None:
-        io.set_enabled(current["_dn"], current["_uac"], planned["enable_change"])
-    if set_pw_on_existing:
-        io.set_password(current["_dn"], password)
+        if planned["attr_changes"]:
+            io.apply_attrs(current["_dn"], planned["attr_changes"])
+        if planned["enable_change"] is not None:
+            io.set_enabled(current["_dn"], current["_uac"], planned["enable_change"])
+        if set_pw_on_existing:
+            io.set_password(current["_dn"], password)
+    except Exception as exc:
+        if created:
+            _undo_create(io, username, exc)
+        raise
 
     result["user"] = public_state(io.read_current(username), username)
     return result

@@ -150,6 +150,15 @@ notes:
   - Computer accounts are not managed by this module. A I(username) that names
     a computer account matches nothing, so C(state=absent) never deletes a
     computer object.
+  - Creating a user is all-or-nothing. LDAP offers no transactions, so if any
+    step after the initial add fails (placing the account under I(path),
+    writing attributes or the enabled state), the module removes the account
+    it just created and fails with the cause; a failed create never leaves a
+    half-configured account behind. A password rejected by the domain policy
+    is cleaned up by samba's own create helper (it deletes the account it just
+    added) and reported cleanly, so no account remains either. Changes to an
+    existing user are separate LDAP operations; if one fails, the earlier ones
+    stay applied and a re-run completes the rest.
 """
 
 EXAMPLES = r"""

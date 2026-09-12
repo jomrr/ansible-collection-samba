@@ -61,6 +61,16 @@
           - _clearattr.users[0].display_name is none
           - _clearattr.users[0].description is none
 
+    - name: Verify | Read the user whose create was rejected by the password policy
+      jomrr.samba.samba_user_info:
+        username: weakpw
+      register: _weakpw
+
+    - name: Verify | The rejected create left no account behind (all-or-nothing)
+      ansible.builtin.assert:
+        that:
+          - _weakpw.users | length == 0
+
     - name: Verify | Read the disabled user
       jomrr.samba.samba_user_info:
         username: todisable

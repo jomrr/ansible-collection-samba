@@ -108,6 +108,12 @@ seealso:
 notes:
   - This module must be executed on a Samba AD DC where the C(samba) Python
     bindings and the directory are available.
+  - Creating a group is all-or-nothing. LDAP offers no transactions, so if any
+    step after the initial add fails (placing it under I(path), setting
+    I(gid_number), adding a member), the module removes the group it just
+    created and fails with the cause. Changes to an existing group are separate
+    LDAP operations; if one fails, the earlier ones stay applied and a re-run
+    completes the rest.
 """
 
 EXAMPLES = r"""

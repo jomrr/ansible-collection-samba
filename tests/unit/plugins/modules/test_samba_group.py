@@ -385,3 +385,57 @@ def test_create_with_empty_description_passes_none():
     assert result["changed"] is True
     assert fake.current["description"] is None
     assert result["group"]["description"] is None
+
+
+# --- all-or-nothing create (compensation, since LDAP has no transactions) ---
+
+class _MemberFailIO(FakeIO):
+    """add_member fails after the group was created."""
+
+    def add_member(self, group_dn, dn):
+        self.calls.append(("add_member", dn))
+        raise RuntimeError("00000035: Unwilling to perform")
+
+
+def test_create_failure_on_member_add_removes_the_new_group():
+    fake = _MemberFailIO(current=None)
+    with pytest.raises(logic.SambaGroupError) as excinfo:
+        logic.run(make_params(members=["jdoe"]), False, fake)
+    names = call_names(fake)
+    assert names.index("create_group") < names.index("delete_group")
+    assert fake.current is None
+    assert "partially created object was removed" in str(excinfo.value)
+    assert "Unwilling to perform" in str(excinfo.value)
+
+
+def test_create_failure_on_gid_removes_the_new_group():
+    class _GidFailIO(FakeIO):
+        def set_gid_number(self, dn, gid_number):
+            self.calls.append(("set_gid_number", gid_number))
+            raise RuntimeError("0000202F: Constraint violation")
+
+    fake = _GidFailIO(current=None)
+    with pytest.raises(logic.SambaGroupError):
+        logic.run(make_params(gid_number=10000), False, fake)
+    assert "delete_group" in call_names(fake)
+    assert fake.current is None
+
+
+def test_create_collision_is_not_undone():
+    class _CollisionIO(FakeIO):
+        def create_group(self, name, group_type_value, description):
+            self.calls.append(("create_group", name, group_type_value, description))
+            raise logic.SambaGroupError("group 'engineers' already exists (created concurrently?)")
+
+    fake = _CollisionIO(current=None)
+    with pytest.raises(logic.SambaGroupError):
+        logic.run(make_params(), False, fake)
+    assert "delete_group" not in call_names(fake)
+
+
+def test_modify_failure_leaves_the_existing_group_alone():
+    fake = _MemberFailIO(current=existing_group())
+    with pytest.raises(RuntimeError):
+        logic.run(make_params(members=["jdoe"]), False, fake)
+    assert "delete_group" not in call_names(fake)
+    assert fake.current is not None
