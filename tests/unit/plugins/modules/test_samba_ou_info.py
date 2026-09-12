@@ -14,6 +14,7 @@ from ansible.module_utils import basic
 from ansible.module_utils.testing import patch_module_args
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_ou_info
 
 
@@ -62,6 +63,13 @@ class FakeLdb:
     def binary_encode(self, value):
         self.encoded.append(value)
         return "ESC(%s)" % value
+
+    def Dn(self, samdb, text):
+        # ldb.Dn rejects a malformed DN with ValueError; a valid one is kept as
+        # its text so the search base can be asserted as a string.
+        if "=" not in text:
+            raise ValueError("unable to parse dn string")
+        return text
 
 
 class FakeSamDB:
@@ -119,6 +127,15 @@ def test_query_single_existing(monkeypatch):
 def test_query_single_missing_is_empty(monkeypatch):
     monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
     assert samba_ou_info.query(FakeSamDB(result=[]), "ghost", "DC=example,DC=com") == []
+
+
+def test_query_invalid_path_is_a_clean_error(monkeypatch):
+    monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
+    samdb = FakeSamDB(result=[])
+    with pytest.raises(logic.SambaOuError):
+        samba_ou_info.query(samdb, None, "not a dn")
+    # Rejected before any search reached the directory.
+    assert samdb.captured == {}
 
 
 def test_query_missing_base_is_empty(monkeypatch):

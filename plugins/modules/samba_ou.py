@@ -223,7 +223,8 @@ class SambaOuIO:
 
         Returns ``False`` if it was already gone (idempotent no-op). A non-empty
         OU fails cleanly (the DC rejects deleting a non-leaf), which also covers
-        the race where a child appears just before deletion.
+        the race where a child appears just before deletion; so do an OU the
+        directory protects (systemFlags) and one the bind user may not delete.
         """
         ldb = samba_ldb.load_ldb()
         try:
@@ -234,6 +235,16 @@ class SambaOuIO:
                 return False
             if err.args[0] == ldb.ERR_NOT_ALLOWED_ON_NON_LEAF:
                 raise logic.SambaOuError("OU '%s' is not empty; it contains child objects" % dn)
+            if err.args[0] == ldb.ERR_UNWILLING_TO_PERFORM:
+                raise logic.SambaOuError(
+                    "OU '%s' is protected from deletion by the directory: %s"
+                    % (dn, samba_ldb.error_text(err))
+                )
+            if err.args[0] == ldb.ERR_INSUFFICIENT_ACCESS_RIGHTS:
+                raise logic.SambaOuError(
+                    "the bind user may not delete OU '%s' (protected from accidental deletion, "
+                    "or missing rights): %s" % (dn, samba_ldb.error_text(err))
+                )
             raise
 
 

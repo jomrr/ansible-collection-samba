@@ -281,6 +281,12 @@
         path: "{{ samba_base_dn }}"
         state: absent
 
+    - name: Converge | samba_ou_info rejects an invalid path cleanly (no traceback)
+      jomrr.samba.samba_ou_info:
+        path: not a dn
+      register: _badpath
+      failed_when: _badpath is not failed or 'not a valid distinguished name' not in _badpath.msg
+
     - name: Converge | Create a user directly in an OU
       jomrr.samba.samba_user:
         username: placed

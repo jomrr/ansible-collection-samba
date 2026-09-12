@@ -60,6 +60,8 @@ class FakeLdb:
     FLAG_MOD_DELETE = 3
     ERR_NO_SUCH_ATTRIBUTE = 16
     ERR_NO_SUCH_OBJECT = 32
+    ERR_INSUFFICIENT_ACCESS_RIGHTS = 50
+    ERR_UNWILLING_TO_PERFORM = 53
     ERR_ENTRY_ALREADY_EXISTS = 68
     ERR_NOT_ALLOWED_ON_NON_LEAF = 66
     LdbError = FakeLdbError
@@ -198,6 +200,23 @@ def test_delete_non_empty_raises_clean():
     samdb = FakeSamDB(delete_error=FakeLdbError(FakeLdb.ERR_NOT_ALLOWED_ON_NON_LEAF, "not leaf"))
     with pytest.raises(logic.SambaOuError):
         make_io(samdb).delete_ou("OU=Staff,DC=example,DC=com")
+
+
+def test_delete_protected_by_system_flags_raises_clean():
+    samdb = FakeSamDB(delete_error=FakeLdbError(
+        FakeLdb.ERR_UNWILLING_TO_PERFORM, "objectclass: Cannot delete OU=Staff,DC=example,DC=com: protected"))
+    with pytest.raises(logic.SambaOuError) as raised:
+        make_io(samdb).delete_ou("OU=Staff,DC=example,DC=com")
+    assert "protected" in str(raised.value)
+    # The ldb message itself, not the (code, message) tuple.
+    assert "(53, " not in str(raised.value)
+
+
+def test_delete_without_permission_raises_clean():
+    samdb = FakeSamDB(delete_error=FakeLdbError(FakeLdb.ERR_INSUFFICIENT_ACCESS_RIGHTS, "access denied"))
+    with pytest.raises(logic.SambaOuError) as raised:
+        make_io(samdb).delete_ou("OU=Staff,DC=example,DC=com")
+    assert "may not delete" in str(raised.value)
 
 
 def test_delete_success_returns_true():

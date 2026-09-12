@@ -124,10 +124,17 @@ def query(samdb, name, path):
     every OU in the subtree below ``path`` (the domain root when ``path`` is
     omitted) is returned. The ``name`` is escaped via ``ldb.binary_encode``
     before it enters the search filter, so it cannot break out into LDAP filter
-    syntax. A missing ``path`` base maps to an empty result.
+    syntax. ``path`` is parsed as a DN first: an invalid one is a clear error, a
+    missing one maps to an empty result.
     """
     ldb = samba_ldb.load_ldb()
-    base = path if path is not None else samdb.domain_dn()
+    if path is None:
+        base = samdb.domain_dn()
+    else:
+        try:
+            base = samba_ldb.parse_dn(samdb, path)
+        except ValueError:
+            raise logic.SambaOuError("path '%s' is not a valid distinguished name" % path)
     if name is None:
         scope = ldb.SCOPE_SUBTREE
         expression = "(objectClass=organizationalUnit)"
@@ -159,6 +166,8 @@ def main():
 
     try:
         ous = query(samdb, module.params["name"], module.params["path"])
+    except logic.SambaOuError as exc:
+        module.fail_json(msg=to_native(exc))
     except Exception as exc:
         module.fail_json(
             msg="samba_ou_info failed: %s" % to_native(exc),
