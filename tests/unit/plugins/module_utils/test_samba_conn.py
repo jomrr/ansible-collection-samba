@@ -49,6 +49,7 @@ class FakeLoadParm:
 
 class FakeCredentials:
     instances = []
+    kinit_error = None
 
     def __init__(self):
         self.calls = {}
@@ -66,23 +67,33 @@ class FakeCredentials:
     def set_kerberos_state(self, value):
         self.calls["kerberos_state"] = value
 
+    def get_named_ccache(self, lp, name):
+        self.calls["diag_ccache"] = name
+        if FakeCredentials.kinit_error is not None:
+            raise RuntimeError(FakeCredentials.kinit_error)
+        return "CCACHE"
+
 
 class FakeCredentialsModule:
     MUST_USE_KERBEROS = 2
     Credentials = FakeCredentials
 
 
+class FakeLdbError(Exception):
+    """Stand-in for ldb.LdbError; args are (code, message)."""
+
+
 class FakeSamDB:
     instances = []
-    fail = False
+    fail_with = None
 
     def __init__(self, url=None, credentials=None, lp=None):
         self.url = url
         self.credentials = credentials
         self.lp = lp
         FakeSamDB.instances.append(self)
-        if FakeSamDB.fail:
-            raise RuntimeError("LDAP bind to the DC failed")
+        if FakeSamDB.fail_with is not None:
+            raise FakeSamDB.fail_with
 
 
 class FakeSamDBModule:
@@ -124,7 +135,8 @@ def conn_env(monkeypatch):
     monkeypatch.setattr(samba_conn.importlib, "import_module", fake_import)
     FakeCredentials.instances = []
     FakeSamDB.instances = []
-    FakeSamDB.fail = False
+    FakeSamDB.fail_with = None
+    FakeCredentials.kinit_error = None
     saved_ccname = os.environ.get("KRB5CCNAME")
     yield
     if saved_ccname is None:
@@ -171,12 +183,40 @@ def test_realm_derived_from_server_when_omitted(conn_env):
     assert creds.calls["realm"] == "EXAMPLE.COM"
 
 
-def test_connect_failure_does_not_leak_credentials(conn_env):
-    # An authentication/bind failure surfaces here; the error must not carry the
-    # password or user name.
-    FakeSamDB.fail = True
+def _failed_connect(**params):
     with pytest.raises(AnsibleFailJson) as raised:
-        samba_conn.connect_samdb(FakeModule(_params()))
-    blob = str(raised.value.args[0])
-    assert "S3cr3t-pw!" not in blob
-    assert "Administrator" not in blob
+        samba_conn.connect_samdb(FakeModule(_params(**params)))
+    return raised.value.args[0]["msg"]
+
+
+def test_connect_failure_names_the_kerberos_cause_never_the_password(conn_env):
+    # ldb only says NT_STATUS_INVALID_PARAMETER for any Kerberos failure; the
+    # diagnostic kinit supplies the real reason and names the principal.
+    FakeSamDB.fail_with = FakeLdbError(1, "LDAP client internal error: NT_STATUS_INVALID_PARAMETER")
+    FakeCredentials.kinit_error = "kinit for Administrator@EXAMPLE.COM failed (Preauthentication failed)\n"
+    msg = _failed_connect()
+    assert "Administrator@EXAMPLE.COM" in msg
+    assert "Preauthentication failed" in msg
+    assert "NT_STATUS_INVALID_PARAMETER" in msg
+    assert "S3cr3t-pw!" not in msg
+    # the ldb message itself, not the (code, message) tuple
+    assert "(1, " not in msg
+    # the diagnosis never touches disk either
+    assert FakeCredentials.instances[-1].calls["diag_ccache"].startswith("MEMORY:")
+
+
+def test_connect_failure_with_a_valid_ticket_points_at_the_ldap_side(conn_env):
+    FakeSamDB.fail_with = FakeLdbError(1, "LDAP client internal error: NT_STATUS_INVALID_PARAMETER")
+    msg = _failed_connect()
+    assert "ticket was obtained" in msg
+    assert "sealing" in msg
+    assert "NT_STATUS_INVALID_PARAMETER" in msg
+    assert "S3cr3t-pw!" not in msg
+
+
+def test_connect_failure_without_reaching_the_dc_skips_the_kinit(conn_env):
+    FakeSamDB.fail_with = FakeLdbError(1, "LDAP client internal error: NT_STATUS_CONNECTION_REFUSED")
+    msg = _failed_connect()
+    assert "could not reach" in msg
+    assert "NT_STATUS_CONNECTION_REFUSED" in msg
+    assert "diag_ccache" not in FakeCredentials.instances[-1].calls

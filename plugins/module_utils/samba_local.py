@@ -16,9 +16,12 @@ from __future__ import annotations
 import importlib
 import os
 
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
+
 
 class LocalSamdbError(Exception):
-    """A local ``sam.ldb`` exists but could not be opened as an AD DC."""
+    """A local ``sam.ldb`` exists but could not be opened (for lack of
+    privileges, or as an AD DC: a partial/broken install)."""
 
 
 def read_local_domain():
@@ -27,12 +30,13 @@ def read_local_domain():
     :returns: ``{"domaindn", "domainsid", "dnsdomain"}`` when a local ``sam.ldb``
         opens as an AD DC; ``None`` when there is no ``sam.ldb`` (the host is not
         a DC).
-    :raises LocalSamdbError: when a ``sam.ldb`` exists but cannot be opened as an
-        AD DC (a partial/broken install) - never a silent overwrite.
+    :raises LocalSamdbError: when a ``sam.ldb`` exists but cannot be opened - for
+        lack of privileges, or as an AD DC (a partial/broken install); the two are
+        reported apart, and neither is ever a silent overwrite.
 
     The path comes from ``lp.private_path`` (smb.conf-respecting, not hardcoded);
-    ``dnsdomain`` is derived from the domain DN (lowercased) so callers can match
-    it against a requested realm.
+    ``dnsdomain`` is samba's own ``domain_dns_name()`` (lowercased) so callers can
+    match it against a requested realm.
     """
     param = importlib.import_module("samba.param")
     load_parm = param.LoadParm()
@@ -47,10 +51,18 @@ def read_local_domain():
         samdb = samdb_mod.SamDB(url=path, session_info=auth.system_session(), lp=load_parm)
         domaindn = samdb.domain_dn()
         domainsid = str(samdb.get_domain_sid())
+        dnsdomain = samdb.domain_dns_name().lower()
     except Exception as exc:
+        ldb = importlib.import_module("ldb")
+        cause = samba_ldb.error_text(exc)
+        if isinstance(exc, ldb.LdbError) and exc.args[0] == ldb.ERR_INSUFFICIENT_ACCESS_RIGHTS:
+            raise LocalSamdbError(
+                "a Samba database exists at '%s' but this process (uid %d) is not allowed to "
+                "open it: %s; run the module with the privileges of the Samba installation"
+                % (path, os.geteuid(), cause)
+            )
         raise LocalSamdbError(
             "a Samba database exists at '%s' but could not be opened as an AD DC; "
-            "the host appears partially provisioned or corrupt: %s" % (path, exc)
+            "the host appears partially provisioned or corrupt: %s" % (path, cause)
         )
-    dnsdomain = ".".join(component.split("=", 1)[1] for component in domaindn.split(",")).lower()
     return {"domaindn": domaindn, "domainsid": domainsid, "dnsdomain": dnsdomain}

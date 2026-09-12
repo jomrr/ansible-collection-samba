@@ -23,6 +23,18 @@ def load_ldb():
     return importlib.import_module("ldb")
 
 
+def error_text(exc):
+    """Return the message of an ``ldb.LdbError`` (``(code, message)``) or ``str(exc)``.
+
+    ``str()`` of an LdbError is the tuple repr; user-facing messages want the
+    text alone.
+    """
+    args = getattr(exc, "args", ())
+    if len(args) == 2 and isinstance(args[0], int):
+        return str(args[1]).strip()
+    return str(exc).strip()
+
+
 def first_value(message, attr):
     """Return the first value of an LDB message attribute as ``str`` or ``None``."""
     element = message.get(attr)

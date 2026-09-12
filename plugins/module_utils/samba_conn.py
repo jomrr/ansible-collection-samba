@@ -15,8 +15,9 @@ Security properties enforced here (not optional, no parameter weakens them):
     process.
   * LDAP SASL wrapping is forced to ``seal`` - the bind requires encryption and
     fails if the server cannot provide it; it never downgrades to plain.
-  * Credentials never appear in returns, diffs or error messages (``password``
-    is also ``no_log``).
+  * The password never appears in returns, diffs or error messages (it is also
+    ``no_log``). The bind user and realm are not secrets: a failed connection
+    names them together with its cause.
 
 CRITICAL DESIGN CONSTRAINT (unchanged): the ``samba`` bindings are absent in the
 ansible-test sanity container, so every ``samba`` import is lazy (via
@@ -33,6 +34,8 @@ import os
 import traceback
 
 from ansible.module_utils.basic import missing_required_lib
+
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 
 
 def connection_argument_spec():
@@ -85,6 +88,11 @@ def _realm_from_server(server):
     return parts[1].upper() if len(parts) == 2 else server.upper()
 
 
+def _bind_realm(module):
+    """Return the realm to authenticate against (``realm``, or derived from ``server``)."""
+    return module.params.get("realm") or _realm_from_server(module.params["server"])
+
+
 def build_credentials(module):
     """Build GSSAPI credentials with required Kerberos and an in-memory ccache.
 
@@ -101,7 +109,7 @@ def build_credentials(module):
     creds = credentials.Credentials()
     creds.set_username(module.params["bind_username"])
     creds.set_password(module.params["bind_password"])
-    creds.set_realm(module.params.get("realm") or _realm_from_server(module.params["server"]))
+    creds.set_realm(_bind_realm(module))
     # Require Kerberos: fail instead of silently downgrading to NTLM.
     creds.set_kerberos_state(credentials.MUST_USE_KERBEROS)
     return creds
@@ -131,11 +139,51 @@ def connect_samdb(module):
     server = module.params["server"]
     try:
         return samdb_mod.SamDB(url="ldap://%s" % server, credentials=creds, lp=load_parm)
-    except Exception:
-        # Never echo the exception (it can carry the principal); credentials and
-        # ticket must not leak into the error.
-        module.fail_json(
-            msg="could not connect to the Samba AD DC at '%s' over LDAP with "
-                "GSSAPI sign+seal; verify the server, credentials, realm and that "
-                "the DC offers sealing" % server
+    except Exception as exc:
+        module.fail_json(msg=_connect_error(module, creds, load_parm, exc))
+
+
+#: NTSTATUS names ldb reports when the DC was never reached: no authentication
+#: happened, so a Kerberos diagnosis would add nothing.
+_TRANSPORT_STATUS = (
+    "NT_STATUS_CONNECTION_REFUSED",
+    "NT_STATUS_CONNECTION_RESET",
+    "NT_STATUS_CONNECTION_DISCONNECTED",
+    "NT_STATUS_HOST_UNREACHABLE",
+    "NT_STATUS_NETWORK_UNREACHABLE",
+    "NT_STATUS_IO_TIMEOUT",
+    "NT_STATUS_OBJECT_NAME_NOT_FOUND",
+)
+
+
+def _connect_error(module, creds, load_parm, exc):
+    """Explain a failed connection so its causes can be told apart.
+
+    ldb reports a bare NTSTATUS for the bind (``NT_STATUS_INVALID_PARAMETER``
+    for any Kerberos failure), so once the DC was reached a second kinit into a
+    throw-away in-memory cache asks the KDC for the reason: a wrong password, an
+    unreachable KDC or a clock skew each read differently there. A ticket that
+    is obtained fine puts the failure on the LDAP side (sealing refused, no
+    service ticket for the name). The extra attempt happens on this failure path
+    only. The bind user and realm are not secrets and are named; the password
+    never appears (ldb and kinit report codes and principals, and ``no_log``
+    scrubs it anyway).
+    """
+    server = module.params["server"]
+    principal = "%s@%s" % (module.params["bind_username"], _bind_realm(module))
+    cause = samba_ldb.error_text(exc)
+    if any(status in cause for status in _TRANSPORT_STATUS):
+        return "could not reach the Samba AD DC at '%s' over LDAP (port 389): %s" % (server, cause)
+    try:
+        creds.get_named_ccache(load_parm, "MEMORY:jomrr_samba_diag_%d" % os.getpid())
+    except Exception as kerberos_exc:
+        return (
+            "could not connect to the Samba AD DC at '%s' as '%s': no Kerberos ticket could "
+            "be obtained (%s); LDAP reported: %s"
+            % (server, principal, samba_ldb.error_text(kerberos_exc), cause)
         )
+    return (
+        "could not connect to the Samba AD DC at '%s' as '%s': a Kerberos ticket was obtained "
+        "but the GSSAPI sign+seal LDAP bind failed (%s); check that the DC offers sealing and "
+        "that '%s' is the DC's host name as registered in Kerberos" % (server, principal, cause, server)
+    )
