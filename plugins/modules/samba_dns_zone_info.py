@@ -27,7 +27,8 @@ description:
 author:
   - Jonas Mauer (@jomrr)
 requirements:
-  - Must run on a Samba AD DC host with the C(samba) Python bindings installed.
+  - The C(samba) Python bindings (C(python3-samba)) on the host that runs the
+    module.
 options:
   name:
     description:
@@ -39,8 +40,11 @@ seealso:
   - module: jomrr.samba.samba_dns_zone
     description: Manage DNS zones in a Samba AD DC.
 notes:
-  - This module must be executed on a Samba AD DC where the C(samba) Python
-    bindings and the directory are available.
+  - The DC is reached over the network, so the module does not have to run on a
+    domain controller. Any host with the C(samba) bindings that can reach
+    O(server) over LDAP and obtain a Kerberos ticket for its realm will do;
+    running on the DC itself, with O(server) pointing at it, is the simplest
+    topology.
   - The replication scope is derived from the directory partition the zone lives
     in (ForestDnsZones means C(forest), otherwise C(domain)).
 """

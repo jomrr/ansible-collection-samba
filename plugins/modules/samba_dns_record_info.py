@@ -15,8 +15,8 @@ extends_documentation_fragment:
 description:
   - Read DNS records (A, AAAA, CNAME, PTR, MX, TXT, SRV, NS) from a Samba Active
     Directory Domain Controller's internal DNS.
-  - Talks to the directory through the native C(samba) Python bindings (the local
-    C(samba.samdb.SamDB)), not through C(samba-tool) subprocesses.
+  - Talks to the directory through the native C(samba) Python bindings
+    (C(samba.samdb.SamDB) over LDAP), not through C(samba-tool) subprocesses.
   - This module is read-only; it never changes the directory and always reports
     C(changed=false).
   - The returned record fields mirror the parameters of C(jomrr.samba.samba_dns_record),
@@ -24,7 +24,8 @@ description:
 author:
   - Jonas Mauer (@jomrr)
 requirements:
-  - Must run on a Samba AD DC host with the C(samba) Python bindings installed.
+  - The C(samba) Python bindings (C(python3-samba)) on the host that runs the
+    module.
 options:
   zone:
     description:
@@ -48,8 +49,11 @@ seealso:
   - module: jomrr.samba.samba_dns_record
     description: Manage DNS records in a Samba AD DC.
 notes:
-  - This module must be executed on a Samba AD DC where the C(samba) Python
-    bindings and the directory are available.
+  - The DC is reached over the network, so the module does not have to run on a
+    domain controller. Any host with the C(samba) bindings that can reach
+    O(server) over LDAP and obtain a Kerberos ticket for its realm will do;
+    running on the DC itself, with O(server) pointing at it, is the simplest
+    topology.
   - Values are returned in the DC's stored form (AAAA addresses are fully
     expanded, for instance).
 """

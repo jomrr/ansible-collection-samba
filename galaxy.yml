@@ -5,8 +5,9 @@ readme: README.md
 authors:
   - Jonas Mauer
 description: >-
-  Manage Samba AD DC objects (users, groups, OUs) and Samba internal DNS
-  records via native Python bindings.
+  Provision Samba AD domain controllers, join hosts to a domain (DC, member
+  server, SSSD) and manage users, groups, OUs, DNS zones and records via the
+  native Python bindings.
 license_file: LICENSE
 tags:
   - samba

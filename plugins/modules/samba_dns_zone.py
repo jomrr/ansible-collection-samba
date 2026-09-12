@@ -26,8 +26,8 @@ description:
 author:
   - Jonas Mauer (@jomrr)
 requirements:
-  - Must run on a Samba AD DC host with the C(samba) Python bindings installed
-    and the DNS RPC server reachable.
+  - The C(samba) Python bindings (C(python3-samba)) on the host that runs the
+    module, with the DC's C(dnsserver) RPC reachable from it.
 options:
   name:
     description:
@@ -64,8 +64,11 @@ seealso:
   - module: jomrr.samba.samba_dns_record
     description: Manage the records inside a DNS zone.
 notes:
-  - This module must be executed on a Samba AD DC where the C(samba) Python
-    bindings, the directory and the DNS RPC server are available.
+  - The DC is reached over the network (LDAP and the C(dnsserver) RPC), so the
+    module does not have to run on a domain controller. Any host with the
+    C(samba) bindings that can reach O(server) and obtain a Kerberos ticket for
+    its realm will do; running on the DC itself, with O(server) pointing at it,
+    is the simplest topology.
   - Only primary, AD-integrated zones are managed (the set C(samba-tool dns
     zonecreate) supports).
 """

@@ -15,8 +15,8 @@ extends_documentation_fragment:
 description:
   - Create and remove DNS records (A, AAAA, CNAME, PTR, MX, TXT, SRV, NS) in a
     Samba Active Directory Domain Controller's internal DNS.
-  - Talks to the directory through the native C(samba) Python bindings (the
-    local C(samba.samdb.SamDB) DNS API), not through C(samba-tool) subprocesses.
+  - Talks to the directory through the native C(samba) Python bindings
+    (C(samba.samdb.SamDB) over LDAP), not through C(samba-tool) subprocesses.
   - A record is identified by its zone, name, type and value (including the
     full structure for MX and SRV). Only that single record is managed; other
     records of the same name and type but a different value are left untouched.
@@ -28,7 +28,8 @@ description:
 author:
   - Jonas Mauer (@jomrr)
 requirements:
-  - Must run on a Samba AD DC host with the C(samba) Python bindings installed.
+  - The C(samba) Python bindings (C(python3-samba)) on the host that runs the
+    module.
 options:
   zone:
     description:
@@ -93,8 +94,11 @@ seealso:
   - module: jomrr.samba.samba_dns_zone
     description: Manage the DNS zone a record lives in.
 notes:
-  - This module must be executed on a Samba AD DC where the C(samba) Python
-    bindings and the directory are available.
+  - The DC is reached over the network, so the module does not have to run on a
+    domain controller. Any host with the C(samba) bindings that can reach
+    O(server) over LDAP and obtain a Kerberos ticket for its realm will do;
+    running on the DC itself, with O(server) pointing at it, is the simplest
+    topology.
   - The zone must already exist; managing zones is out of scope for this module.
   - Removing the last record of a name leaves a tombstoned node behind, the
     same state C(samba-tool dns delete) produces; Samba's garbage collection
@@ -229,14 +233,14 @@ from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_recor
 
 
 class SambaDnsRecordIO:
-    """Local-SamDB DNS record I/O.
+    """DNS record I/O over the shared LDAP connection.
 
     DNS records are the multi-valued ``dnsRecord`` attribute (NDR-packed
     ``dnsp.DnssrvRpcRecord``) on ``dnsNode`` objects under the zone. All reads and
-    writes go through the local ``SamDB`` (system session) - no RPC, no
-    credentials, no network - the same connection base as the other modules. The
-    ``samba``/``ldb`` bindings are imported lazily via the shared module_utils
-    helpers, so importing this module never requires them.
+    writes go through the ``SamDB`` that ``connect_samdb`` opens (GSSAPI sign+seal
+    LDAP with the caller's credentials) - no RPC - the same connection base as
+    the other modules. The ``samba``/``ldb`` bindings are imported lazily via the
+    shared module_utils helpers, so importing this module never requires them.
     """
 
     def __init__(self, samdb):
