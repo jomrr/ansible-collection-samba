@@ -255,25 +255,40 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
             return None
         return samba_group_io.message_to_state(res[0])
 
-    def resolve_member(self, name):
-        """Resolve a member's sAMAccountName to its DN; the name is escaped.
+    #: Names resolved per LDAP search; keeps the OR filter of a large member
+    #: list bounded.
+    _RESOLVE_BATCH = 200
 
-        Only the DN is needed and it comes with every result; the one attribute
-        requested is a projection that keeps the LDAP search from returning the
-        whole object, which an empty attribute list would (LDAP reads it as
-        "all user attributes").
+    def resolve_members(self, names):
+        """Resolve member sAMAccountNames to DNs with one search per batch.
+
+        An OR filter over the batch (every name escaped) replaces one search per
+        member. The DNs come back in the order given; names that do not exist
+        are reported together in one error. sAMAccountName matches
+        case-insensitively, so results are mapped back by lower-cased name,
+        which is why that attribute (and only it) is requested.
         """
         ldb = samba_ldb.load_ldb()
-        expression = "(sAMAccountName=%s)" % ldb.binary_encode(name)
-        res = self.samdb.search(
-            base=self.samdb.domain_dn(),
-            scope=ldb.SCOPE_SUBTREE,
-            expression=expression,
-            attrs=["distinguishedName"],
-        )
-        if len(res) == 0:
-            raise logic.SambaGroupError("member '%s' not found" % name)
-        return str(res[0].dn)
+        wanted = list(dict.fromkeys(names))
+        found = {}
+        for start in range(0, len(wanted), self._RESOLVE_BATCH):
+            batch = wanted[start:start + self._RESOLVE_BATCH]
+            expression = "(|%s)" % "".join(
+                "(sAMAccountName=%s)" % ldb.binary_encode(member) for member in batch
+            )
+            res = self.samdb.search(
+                base=self.samdb.domain_dn(),
+                scope=ldb.SCOPE_SUBTREE,
+                expression=expression,
+                attrs=["sAMAccountName"],
+            )
+            for message in res:
+                account = samba_ldb.first_value(message, "sAMAccountName") or ""
+                found[account.lower()] = str(message.dn)
+        missing = [member for member in wanted if member.lower() not in found]
+        if missing:
+            raise logic.SambaGroupError("members not found: %s" % ", ".join(missing))
+        return [found[member.lower()] for member in names]
 
     def create_group(self, name, group_type_value, description, path, gid_number):
         """Create the group with one ``newgroup`` call.

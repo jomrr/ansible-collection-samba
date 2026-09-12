@@ -34,9 +34,9 @@ class FakeIO:
         self.calls.append(("rfc2307_provisioned",))
         return self.provisioned
 
-    def resolve_member(self, name):
-        self.calls.append(("resolve_member", name))
-        return member_dn(name)
+    def resolve_members(self, names):
+        self.calls.append(("resolve_members", list(names)))
+        return [member_dn(name) for name in names]
 
     def create_group(self, name, group_type_value, description, path, gid_number):
         self.calls.append(("create_group", name, group_type_value, description, path, gid_number))
@@ -200,7 +200,7 @@ def test_members_omitted_leaves_membership_untouched():
     fake = FakeIO(current=existing_group(members=[member_dn("jdoe")]))
     result = logic.run(make_params(), False, fake)
     assert result["changed"] is False
-    assert "resolve_member" not in call_names(fake)
+    assert "resolve_members" not in call_names(fake)
 
 
 def test_check_mode_create_does_not_write():

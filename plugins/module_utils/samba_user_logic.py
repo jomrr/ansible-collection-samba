@@ -352,15 +352,17 @@ def run(params, check_mode, io):
         current = io.read_current(username)
         if current is None:
             raise SambaUserError("user '%s' could not be read back after creation" % username)
+        # newuser placed the account under path; only the domain root, which
+        # the relative container form cannot express, leaves a move to do.
+        move_needed = io.needs_move(current["_dn"], path)
 
-    # Order: move first (so the later attribute writes target the final DN; a
-    # fresh account is already in place unless path is the domain root, which
-    # newuser cannot express), then attributes, enable state and password.
-    # Each is its own LDAP operation; on a fresh object a failure rolls the
-    # create back, on an existing object the earlier steps stay applied and a
-    # re-run completes the rest.
+    # Order: move first (so the later attribute writes target the final DN),
+    # then attributes, enable state and password. Each is its own LDAP
+    # operation; on a fresh object a failure rolls the create back, on an
+    # existing object the earlier steps stay applied and a re-run completes
+    # the rest.
     try:
-        if io.needs_move(current["_dn"], path):
+        if move_needed:
             io.move(current["_dn"], path)
             current = io.read_current(username)
 

@@ -206,6 +206,20 @@
         path: "OU=loc_a,{{ samba_base_dn }}"
         state: present
 
+    - name: Converge | A group with unknown members fails naming every missing one, before any write
+      jomrr.samba.samba_group:
+        name: badmembers
+        members:
+          - jane
+          - nosuchuser1
+          - nosuchuser2
+        state: present
+      register: _badmembers
+      failed_when: >-
+        _badmembers is not failed
+        or 'nosuchuser1' not in _badmembers.msg
+        or 'nosuchuser2' not in _badmembers.msg
+
     - name: Converge | Create a top-level OU
       jomrr.samba.samba_ou:
         name: department

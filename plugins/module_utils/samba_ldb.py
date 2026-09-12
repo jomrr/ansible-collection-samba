@@ -127,6 +127,9 @@ class SambaObjectIO:
 
     def __init__(self, samdb):
         self.samdb = samdb
+        #: The default Users container, read once per run (a wellKnownObjects
+        #: lookup on the DC) and shared by needs_move and parent_exists.
+        self._default_container = None
 
     def rfc2307_provisioned(self):
         """True if the domain was provisioned with C(--use-rfc2307)."""
@@ -158,9 +161,16 @@ class SambaObjectIO:
             raise
 
     def _desired_parent(self, path):
-        """Return the desired parent DN (path, or the default Users container)."""
+        """Return the desired parent DN (path, or the default Users container).
+
+        The default container is looked up once and reused, so callers must not
+        modify it; a path is parsed afresh each time (``container_below_domain``
+        modifies that copy).
+        """
         if path is None:
-            return default_users_dn(self.samdb)
+            if self._default_container is None:
+                self._default_container = default_users_dn(self.samdb)
+            return self._default_container
         try:
             return parse_dn(self.samdb, path)
         except ValueError:

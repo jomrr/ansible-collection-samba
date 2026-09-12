@@ -172,6 +172,22 @@ def test_create_user_places_the_account_via_userou():
     assert samdb.newuser_kwargs == {"userou": "OU=Eng", "surname": "Doe"}
 
 
+def test_default_container_is_read_once_per_run(monkeypatch):
+    reads = []
+
+    def default_users_dn(samdb):
+        reads.append(samdb)
+        return FakeDn("CN=Users,DC=example,DC=com")
+
+    monkeypatch.setattr(samba_ldb, "default_users_dn", default_users_dn)
+    io = samba_user.SambaUserIO(FakeSamDB())
+    assert io.needs_move("CN=jdoe,CN=Users,DC=example,DC=com", None) is False
+    assert io.parent_exists(None) is True
+    assert io.needs_move("CN=jdoe,OU=Eng,DC=example,DC=com", None) is True
+    # Three questions about the default container, one wellKnownObjects read.
+    assert len(reads) == 1
+
+
 # --- SambaUserIO move wrapper ---
 
 def _io(samdb):

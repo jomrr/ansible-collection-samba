@@ -1,0 +1,10 @@
+---
+minor_changes:
+  - >-
+    samba_group - members are resolved with one LDAP search per batch of names
+    instead of one search per member, and unknown members are reported
+    together in one error.
+  - >-
+    samba_user, samba_group - the default container is looked up once per run
+    instead of on every location check, and the move decision is evaluated
+    once instead of twice.

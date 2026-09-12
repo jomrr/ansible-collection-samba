@@ -189,6 +189,16 @@
           - _posixnew.groups[0].gid_number == 10001
           - _posixnew.groups[0].dn | lower is search('ou=loc_a')
 
+    - name: Verify | Read the group whose members did not exist
+      jomrr.samba.samba_group_info:
+        name: badmembers
+      register: _badmembers
+
+    - name: Verify | The rejected member list left no group behind (resolved before any write)
+      ansible.builtin.assert:
+        that:
+          - _badmembers.groups | length == 0
+
     - name: Verify | Read the purged group
       jomrr.samba.samba_group_info:
         name: crew

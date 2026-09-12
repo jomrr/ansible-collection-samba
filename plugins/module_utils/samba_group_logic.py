@@ -282,7 +282,7 @@ def run(params, check_mode, io):
     """Orchestrate read -> plan -> (check-mode?) -> write -> report.
 
     ``io`` provides ``read_current``, ``rfc2307_provisioned``,
-    ``resolve_member``, ``create_group``, ``set_description``,
+    ``resolve_members``, ``create_group``, ``set_description``,
     ``set_group_type``, ``set_gid_number``, ``add_member``, ``remove_member``,
     ``delete`` and the move helpers ``needs_move``, ``parent_exists`` and
     ``move``. Injecting it keeps this function testable without the bindings.
@@ -303,7 +303,7 @@ def run(params, check_mode, io):
     member_diff = {"adds": [], "removes": []}
     if state == "present" and members is not None:
         current_members = current["members"] if current is not None else []
-        desired_dns = [io.resolve_member(member) for member in members]
+        desired_dns = io.resolve_members(members)
         member_diff = diff_members(current_members, desired_dns, purge)
 
     member_planned = bool(member_diff["adds"] or member_diff["removes"])
@@ -378,16 +378,18 @@ def run(params, check_mode, io):
         current = io.read_current(name)
         if current is None:
             raise SambaGroupError("group '%s' could not be read back after creation" % name)
+        # newgroup placed the group under path; only the domain root, which
+        # the relative container form cannot express, leaves a move to do.
+        move_needed = io.needs_move(current["_dn"], path)
 
-    # Order: move first (so later writes target the final DN; a fresh group is
-    # already in place unless path is the domain root, which newgroup cannot
-    # express), then attributes and membership. Each is its own LDAP operation;
-    # on a fresh group a failure rolls the create back, on an existing group
-    # the earlier steps stay applied and a re-run completes the rest.
+    # Order: move first (so later writes target the final DN), then attributes
+    # and membership. Each is its own LDAP operation; on a fresh group a failure
+    # rolls the create back, on an existing group the earlier steps stay
+    # applied and a re-run completes the rest.
     moved = False
     member_changed = False
     try:
-        if io.needs_move(current["_dn"], path):
+        if move_needed:
             io.move(current["_dn"], path)
             current = io.read_current(name)
             moved = True

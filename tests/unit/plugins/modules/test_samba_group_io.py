@@ -79,12 +79,14 @@ class FakeSamDB:
         self.modified = []
         self.deleted = []
         self.created = []
+        self.searches = []
 
     def domain_dn(self):
         return "DC=example,DC=com"
 
     def search(self, base, scope, expression, attrs):
         self.captured = {"base": base, "scope": scope, "expression": expression, "attrs": attrs}
+        self.searches.append(self.captured)
         return self.search_result
 
     def newgroup(self, name, groupou=None, grouptype=None, description=None, gidnumber=None):
@@ -134,17 +136,44 @@ def test_read_current_absent_returns_none():
     assert make_io(FakeSamDB(search_result=[])).read_current("ghost") is None
 
 
-def test_resolve_member_escapes_and_returns_dn():
-    msg = FakeMessage(dn="CN=jdoe,DC=example,DC=com")
-    samdb = FakeSamDB(search_result=[msg])
-    dn = make_io(samdb).resolve_member("jd)(oe")
-    assert dn == "CN=jdoe,DC=example,DC=com"
-    assert samdb.captured["expression"] == "(sAMAccountName=ESC(jd)(oe))"
+def _account(name, dn):
+    return FakeMessage({"sAMAccountName": [name]}, dn)
 
 
-def test_resolve_member_not_found_raises():
-    with pytest.raises(logic.SambaGroupError):
-        make_io(FakeSamDB(search_result=[])).resolve_member("ghost")
+def test_resolve_members_one_escaped_or_search_for_all_names():
+    samdb = FakeSamDB(search_result=[
+        _account("jd)(oe", "CN=jdoe,DC=example,DC=com"),
+        _account("asmith", "CN=asmith,DC=example,DC=com"),
+    ])
+    dns = make_io(samdb).resolve_members(["jd)(oe", "asmith"])
+    assert dns == ["CN=jdoe,DC=example,DC=com", "CN=asmith,DC=example,DC=com"]
+    # One search for all names, every name escaped inside the OR filter.
+    assert len(samdb.searches) == 1
+    assert samdb.captured["expression"] == "(|(sAMAccountName=ESC(jd)(oe))(sAMAccountName=ESC(asmith)))"
+
+
+def test_resolve_members_maps_results_back_case_insensitively():
+    samdb = FakeSamDB(search_result=[_account("jdoe", "CN=jdoe,DC=example,DC=com")])
+    assert make_io(samdb).resolve_members(["JDoe"]) == ["CN=jdoe,DC=example,DC=com"]
+
+
+def test_resolve_members_reports_every_missing_name_at_once():
+    samdb = FakeSamDB(search_result=[_account("jdoe", "CN=jdoe,DC=example,DC=com")])
+    with pytest.raises(logic.SambaGroupError) as raised:
+        make_io(samdb).resolve_members(["jdoe", "ghost1", "ghost2"])
+    assert "ghost1" in str(raised.value)
+    assert "ghost2" in str(raised.value)
+
+
+def test_resolve_members_batches_large_lists(monkeypatch):
+    monkeypatch.setattr(samba_group.SambaGroupIO, "_RESOLVE_BATCH", 2)
+    samdb = FakeSamDB(search_result=[
+        _account("a", "CN=a,DC=example,DC=com"),
+        _account("b", "CN=b,DC=example,DC=com"),
+        _account("c", "CN=c,DC=example,DC=com"),
+    ])
+    make_io(samdb).resolve_members(["a", "b", "c"])
+    assert len(samdb.searches) == 2
 
 
 def test_create_group_collision_raises_clean():
