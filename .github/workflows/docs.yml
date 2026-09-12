@@ -24,7 +24,7 @@ name: docs
     types:
       - completed
     # Head branch of the triggering run: only pushes to main, not the PR runs
-    # from dev or the v* tag runs.
+    # from dev.
     branches:
       - main
   workflow_dispatch:

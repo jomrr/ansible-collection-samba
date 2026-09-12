@@ -1,17 +1,34 @@
 ---
 # Dev-branch workflow: the fast feedback loop. Runs on push to the dev branch
 # and on pull requests targeting dev, calling the shared fast gates in test.yml.
-# The full run (the same gates plus the Molecule matrix) lives in main.yml, which
-# triggers on push to main and on release tags.
+# The full run (the same gates plus the Molecule matrix) lives in main.yml,
+# which triggers on push to main. Pushes that touch only files no gate reads
+# (paths-ignore, the same list as in main.yml) start no run at all.
 name: dev
 
 "on":
   push:
     branches:
       - dev
+    paths-ignore:
+      - ".gitignore"
+      - "LICENSE"
+      - "README.md"
+      - "CHANGELOG.rst"
+      - "Makefile"
+      - "pyproject.toml"
+      - "architecture/**"
   pull_request:
     branches:
       - dev
+    paths-ignore:
+      - ".gitignore"
+      - "LICENSE"
+      - "README.md"
+      - "CHANGELOG.rst"
+      - "Makefile"
+      - "pyproject.toml"
+      - "architecture/**"
 
 jobs:
   test:
