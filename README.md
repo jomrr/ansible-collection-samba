@@ -25,7 +25,7 @@ connection options through the `jomrr.samba.all` action group (see Connection
 setup).
 
 | Module | Purpose | idempotent | check_mode |
-|--------|---------|------------|------------|
+| ------ | ------- | ---------- | ---------- |
 | `samba_user` | Create, modify and remove users (incl. RFC2307/POSIX attributes) | yes | yes |
 | `samba_user_info` | Query users | n/a (read) | n/a |
 | `samba_group` | Create, modify and remove groups (scope, category, members, gid) | yes | yes |
@@ -48,7 +48,7 @@ group (see Execution topology → Lifecycle modules run locally). Only
 binary.
 
 | Module | Purpose | idempotent | check_mode |
-|--------|---------|------------|------------|
+| ------ | ------- | ---------- | ---------- |
 | `samba_provision` | Provision a brand-new Samba AD domain controller | yes (binary) | yes |
 | `samba_join_dc` | Join an existing domain as an additional DC | yes (binary) | yes |
 | `samba_join_member` | Join an existing domain as a Samba member server (winbind) | yes (binary) | yes |
