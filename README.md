@@ -189,7 +189,7 @@ Execution topology.)
 Each of these modules therefore takes these connection options:
 
 | Option | Required | Description |
-|--------|----------|-------------|
+| ------ | -------- | ----------- |
 | `server` | yes | DNS host name of the DC, e.g. `dc1.example.com` |
 | `bind_username` | yes | Account to bind as, e.g. `Administrator` |
 | `bind_password` | yes | Its password. **Keep it in Ansible Vault or a secret store** |
