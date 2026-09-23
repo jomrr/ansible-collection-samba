@@ -3,7 +3,7 @@
 # ansible-test needs is provided by the existing path/symlink on this host).
 #
 # ansible-test runs against Podman here (docker is real Moby on this host), so
-# the calls set ANSIBLE_TEST_PREFER_PODMAN=1 and target Python 3.12 — the same
+# the calls set ANSIBLE_TEST_PREFER_PODMAN=1 and target Python 3.12, the same
 # invocation that works manually. CI uses plain --docker instead (.github/).
 
 PYTHON_VERSION := 3.12

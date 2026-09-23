@@ -105,10 +105,10 @@ Native Python bindings.
 
 `plugins/module_utils/samba_conn.py` never imports `samba` at module level.
 
-- Existence check via `importlib.util.find_spec("samba")` — binds no symbol, so
+- Existence check via `importlib.util.find_spec("samba")`: binds no symbol, so
   no unused-import / F401.
 - Real imports via `importlib.import_module(...)` inside the function that needs
-  them — ordinary function calls, so no `import-outside-toplevel`.
+  them: ordinary function calls, so no `import-outside-toplevel`.
 - If the binding is missing at runtime: `fail_json` with `missing_required_lib`.
 
 This keeps the sanity phase green without touching a lint rule or adding an
@@ -165,7 +165,7 @@ not systemd).
 
 Every module connects to the DC with explicit caller credentials
 (`server`/`username`/`password`/`realm`) over LDAP using SASL/GSSAPI with signing
-and sealing on port 389 — the GSSAPI layer encrypts the traffic, so no LDAPS or
+and sealing on port 389; the GSSAPI layer encrypts the traffic, so no LDAPS or
 StartTLS is involved. Kerberos is required (`MUST_USE_KERBEROS`, so the bind
 fails rather than downgrading to NTLM), sealing is forced
 (`client ldap sasl wrapping = seal`, so it fails rather than downgrading to an
@@ -242,7 +242,7 @@ departs from several collection conventions:
   over `ldap://`), `samba_provision` must run on the future DC itself
   (`hosts: <dc>` / `delegate_to`). It calls `samba.provision.provision()`
   locally and opens the local `sam.ldb` directly.
-- **`state` present only.** No `absent` — destroying a domain is intentionally
+- **`state` present only.** No `absent`; destroying a domain is intentionally
   not offered. Only provisioning; joining an existing domain is a future
   separate module, not this one.
 - **Binary, non-incremental idempotency.** Idempotency is "is a DC already
@@ -260,7 +260,7 @@ departs from several collection conventions:
 
 ### Verified API (samba 4.23.8)
 
-- `provision(logger, session_info, ...)` — `logger` and `session_info` are the
+- `provision(logger, session_info, ...)`: `logger` and `session_info` are the
   only positional requireds (48 parameters total); everything else is keyword
   with sane defaults. `samba-tool domain provision` itself calls this with
   `logger=get_logger(...)`, `session_info=samba.auth.system_session()` and
@@ -296,7 +296,7 @@ departs from several collection conventions:
   `fail_json` ("present but broken"), never a silent re-provision. This local
   `system_session` open is the one place the collection still uses the
   credential-free local LDB path that the object modules abandoned (see
-  Connection Model) — justified because provisioning is inherently pre-DC and
+  Connection Model), justified because provisioning is inherently pre-DC and
   local, with no DC to authenticate against yet.
 
 ### Open design points (settled in Phase 2)
@@ -311,7 +311,7 @@ departs from several collection conventions:
   diffed; a parameter mismatch is a no-op, not a failure (`present` = "a DC
   exists here").
 - **Race/TOCTOU (rule 9)**: the window between the "not provisioned" check and
-  `provision()` is negligible — provisioning is a one-time setup step, not a
+  `provision()` is negligible; provisioning is a one-time setup step, not a
   concurrent path. `provision()` into a non-empty private dir fails on its own,
   which is surfaced as a clear `fail_json` rather than a traceback.
 
@@ -335,10 +335,10 @@ joining host like `samba_provision`. The mechanism was verified against samba
 The family is split by **join mechanism and the artifact it writes**, not by the
 host's intended purpose:
 
-- `samba_join_dc` — `samba.join.join_DC` bindings, full DC replication.
-- `samba_join_member` — `samba.net_s3.join_member` bindings, writes
+- `samba_join_dc` - `samba.join.join_DC` bindings, full DC replication.
+- `samba_join_member` - `samba.net_s3.join_member` bindings, writes
   `secrets.tdb` (the Samba-native, winbind-backed path).
-- `samba_join_sssd` — `adcli join` (CLI), writes a Kerberos **keytab** (the
+- `samba_join_sssd` - `adcli join` (CLI), writes a Kerberos **keytab** (the
   SSSD-native path).
 
 **There is no `samba_join_client` and no `backend` switch.** The earlier plan
@@ -348,7 +348,7 @@ honester cut. Rationale: at the *join layer* a winbind "client" enrolment is
 `secrets.tdb`); "client vs. member" is a **role-level** distinction (how the host
 is configured and used), not a module-level one. The only real fork is the
 artifact: `secrets.tdb` (winbind) vs a keytab (SSSD). So the two artifacts *are*
-the two modules — `samba_join_member` and `samba_join_sssd` — and a `backend`
+the two modules (`samba_join_member` and `samba_join_sssd`), and a `backend`
 parameter would have been a false abstraction over what are really two different
 tools writing two different files.
 
@@ -387,7 +387,7 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
     one. Consequence: the module derives the NetBIOS name from loadparm/the
     hostname (`lp.get("netbios name")`, the same default `samba-tool` uses) when
     the caller omits it, and never passes `None` to `join_DC()`. Surfaced only by
-    the live multi-host Molecule join — mocked units, which stub `join_DC`, could
+    the live multi-host Molecule join; mocked units, which stub `join_DC`, could
     not see it.
 - **samba_join_member (winbind) - bindings.** The standard AD member join is
   `samba.net_s3.Net(creds, s3_lp, server).join_member(dnshostname, createupn,
@@ -422,7 +422,7 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
   the module ensures "this host is a DC of the target domain"; an existing
   matching DC is the no-op. **Empirically confirmed** by the live multi-host
   Molecule test: the local DC's domain identity is reliably readable and
-  comparable to the target — the replication proof (a `repltest` user seeded on
+  comparable to the target: the replication proof (a `repltest` user seeded on
   the existing DC and found in the joiner's replica) passed on all four joiner
   distros, the second run was an idempotent no-op, and the foreign-domain refusal
   fired live.)
@@ -490,7 +490,7 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
   binding expects the value `samba-tool` always supplies (e.g. `dnshostname`,
   `machinepass`), and derive a sane default in the module rather than forward
   `None`. This class of bug is caught only by a live join, not by mocked units
-  that stub the binding — so each join module needs its own live Molecule pass.
+  that stub the binding, so each join module needs its own live Molecule pass.
 
 ### Status
 

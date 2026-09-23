@@ -4,10 +4,10 @@ Modules for the full lifecycle of a Samba Active Directory domain, through the
 native `samba` Python bindings (`samba.samdb.SamDB`, `samba.join`,
 `samba.net_s3`, `samba.dcerpc`):
 
-- **Object management** on a running DC — users, groups, organizational units,
+- **Object management** on a running DC: users, groups, organizational units,
   the domain password policy and fine-grained password settings, and the Samba
   internal DNS.
-- **Domain lifecycle** — provisioning a new domain controller, joining a host
+- **Domain lifecycle**: provisioning a new domain controller, joining a host
   to an existing domain (as a DC, a Samba member server, or an SSSD client),
   and extending the schema (Windows LAPS, OpenSSH public keys, LDAP compat).
 
@@ -44,7 +44,7 @@ setup).
 These run **locally on the target machine** that is becoming/joining a DC, take
 no GSSAPI connection options, and are **not** in the `jomrr.samba.all` action
 group (see Execution topology → Lifecycle modules run locally). Only
-`state: present` is supported — there is no tear-down/leave. Idempotency is
+`state: present` is supported; there is no tear-down/leave. Idempotency is
 binary.
 
 | Module | Purpose | idempotent | check_mode |
@@ -58,14 +58,14 @@ binary.
 The three join modules are split **by join mechanism and the artifact each
 writes**, not by the host's intended purpose:
 
-- `samba_join_dc` — `samba.join`, full DC replication.
-- `samba_join_member` — `samba.net_s3`, writes the machine secret to
+- `samba_join_dc` - `samba.join`, full DC replication.
+- `samba_join_member` - `samba.net_s3`, writes the machine secret to
   `secrets.tdb` (the winbind path).
-- `samba_join_sssd` — `adcli`, writes a Kerberos keytab (the SSSD path).
+- `samba_join_sssd` - `adcli`, writes a Kerberos keytab (the SSSD path).
 
 Each module performs **only the join act** and its idempotency detection. It
 does not template `smb.conf`/`sssd.conf`, configure idmap/nsswitch/PAM, or
-enable/start the winbind or SSSD daemon — that is the caller's responsibility.
+enable/start the winbind or SSSD daemon; that is the caller's responsibility.
 In particular `samba_join_member` requires a pre-configured `smb.conf`
 (`realm`, `workgroup`, `server role = member server`) to join against.
 
@@ -88,7 +88,7 @@ feeding the join password on stdin, never on the command line.
   have `adcli` installed; it fails cleanly if `adcli` is not on `PATH`. The other
   lifecycle modules need only `python3-samba`.
 - **Kerberos / GSSAPI:** the executing host must be able to obtain a Kerberos
-  ticket for the DC's realm — working DNS/SRV resolution to the DC, a matching
+  ticket for the DC's realm: working DNS/SRV resolution to the DC, a matching
   `krb5.conf`, and synchronised clocks (clock skew breaks Kerberos).
 - **ansible-core:** `>= 2.19.0` (see `meta/runtime.yml`).
 - **RFC2307/POSIX attributes** (`uid_number`, `gid_number`,
@@ -99,13 +99,13 @@ feeding the join password on stdin, never on the command line.
 
 ## Execution topology
 
-The **object and info modules** reach the DC over the network — a GSSAPI
+The **object and info modules** reach the DC over the network (a GSSAPI
 sign+seal `ldap://` connection, and for `samba_dns_zone` additionally a
-`dnsserver` RPC — and have no DC-local dependency. Two topologies are supported.
-(The lifecycle modules are different — see *Lifecycle modules run locally* at the
+`dnsserver` RPC) and have no DC-local dependency. Two topologies are supported.
+(The lifecycle modules are different; see *Lifecycle modules run locally* at the
 end of this section.)
 
-### Preferred — run on the DC (loopback)
+### Preferred: run on the DC (loopback)
 
 Run the module on the domain controller itself and point `server` at that same
 DC, so the connection goes over loopback:
@@ -124,11 +124,11 @@ DC, so the connection goes over loopback:
 
 This is the topology the integration tests cover end to end across all supported
 distributions: the sealed LDAP connection and the DNS-zone RPC both run over
-loopback, with no firewall and no RPC endpoint-mapper detour — the fewest moving
+loopback, with no firewall and no RPC endpoint-mapper detour: the fewest moving
 parts and the highest chance of success. `python3-samba` is already present on a
 DC.
 
-### Also supported — run from the controller against a remote DC
+### Also supported: run from the controller against a remote DC
 
 Run the module on the Ansible controller (`hosts: localhost`) and point `server`
 at the remote DC's FQDN:
@@ -148,7 +148,7 @@ at the remote DC's FQDN:
 Every operation runs over network paths (`ldap://` or the TCP RPC), so the code
 fully supports this. It adds requirements on the controller:
 
-- **`python3-samba` must be installed on the controller** — it is the host that
+- **`python3-samba` must be installed on the controller**; it is the host that
   runs the module. A controller version close to the DC's Samba version is
   advisable for the DNS-zone RPC IDL; plain LDAP is more version-tolerant.
 - **Kerberos must resolve from the controller to the DC** (DNS/SRV records, a
@@ -171,7 +171,7 @@ they always run *on that host* (`hosts:` the target, or `delegate_to` it). They
 have no GSSAPI sealed-LDAP session and are not in the `jomrr.samba.all` action
 group. The options they share with the object modules by name (`server`,
 `bind_username`, `bind_password`, `realm`) mean something different here: the
-existing DC to join against and the admin credentials to authorize the join —
+existing DC to join against and the admin credentials to authorize the join,
 not a connection to manage objects on. `samba_provision` takes no `server`/bind
 options at all (there is no DC yet); it provisions the domain locally.
 `samba_schema_extension` is local in the same way: it writes the schema master's
@@ -192,11 +192,11 @@ Each of these modules therefore takes these connection options:
 |--------|----------|-------------|
 | `server` | yes | DNS host name of the DC, e.g. `dc1.example.com` |
 | `bind_username` | yes | Account to bind as, e.g. `Administrator` |
-| `bind_password` | yes | Its password — **keep it in Ansible Vault or a secret store** |
+| `bind_password` | yes | Its password. **Keep it in Ansible Vault or a secret store** |
 | `realm` | no | Kerberos realm, e.g. `EXAMPLE.COM`; derived from `server` if omitted |
 
 > **Security:** `bind_password` is marked `no_log`, but that only scrubs it from
-> module output — it does not protect a plain-text value at rest. Always supply
+> module output; it does not protect a plain-text value at rest. Always supply
 > it through Ansible Vault or an external secret store, never in plain text in a
 > playbook, inventory or variable file. Bind with an account that has exactly
 > the privileges it needs; the DC authorizes every operation against that
@@ -257,7 +257,7 @@ The object and info modules connect over LDAP with SASL/GSSAPI, configured in
 - **The connection is sealed.** `client ldap sasl wrapping` is forced to `seal`,
   so the bind requires the GSSAPI confidentiality layer (encryption) and fails
   rather than downgrading to a signed-only or plain bind. There is no LDAPS or
-  StartTLS — the GSSAPI layer encrypts the traffic on port 389.
+  StartTLS: the GSSAPI layer encrypts the traffic on port 389.
 - **The Kerberos ticket stays in memory.** The ticket obtained from the bind
   credentials is held in a process-private in-memory credential cache
   (`KRB5CCNAME=MEMORY:…`); it never lands on disk and dies with the module
@@ -271,7 +271,7 @@ The object and info modules connect over LDAP with SASL/GSSAPI, configured in
 
 `bind_password`, user `password`, and the join `machinepass` are marked `no_log`.
 No password value is interpolated into any return value, diff, error message or
-log: error paths reference the object name, DN or realm — never the password —
+log: error paths reference the object name, DN or realm (never the password),
 and the connection-failure path deliberately does not echo the underlying
 exception (which can carry the principal). Keep `bind_password` and user
 passwords in **Ansible Vault** or an external secret store; `no_log` scrubs
@@ -285,18 +285,18 @@ through the `ldb` bindings, never built by string concatenation:
 - **LDAP/LDB filters** escape every value with `ldb.binary_encode` (for example
   the `sAMAccountName`, zone and member lookups). It hex-encodes the value's
   bytes, including the filter metacharacters `( ) * \` and NUL, and does not
-  normalize — so a Unicode look-alike of a metacharacter (a full-width comma, a
+  normalize, so a Unicode look-alike of a metacharacter (a full-width comma, a
   zero-width or right-to-left character) is encoded as its own bytes and can
   never become filter syntax.
 - **Distinguished names** are built with `ldb.Dn.set_component` (the RDN value is
   escaped) and parsed with `ldb.Dn` (a malformed `path` is rejected with a clear
   error). An embedded `,OU=…` in a name therefore stays a single, escaped RDN
-  value — it cannot re-parent the object into another container.
+  value; it cannot re-parent the object into another container.
 
 **Honest limit:** idempotency compares names by exact code points; the modules do
 not Unicode-normalize input. With non-ASCII names, provide a consistent
 normalization across runs. Inconsistent normalization (e.g. NFC in one run, NFD
-in another) can at worst mismatch an existing object and create a duplicate — it
+in another) can at worst mismatch an existing object and create a duplicate; it
 is a data-consistency edge, not a security issue.
 
 ### The CLI exception
@@ -313,7 +313,7 @@ tool (there is no Python binding for it): the join password is fed to `adcli` on
 - The **object and info modules** are remote-capable over the sealed GSSAPI LDAP
   connection and are preferably run on the DC itself (loopback).
 - The **lifecycle modules** (`samba_provision`, the join modules) run locally on
-  the target machine and write local secret stores — the directory database
+  the target machine and write local secret stores: the directory database
   (`sam.ldb`), the machine secret (`secrets.tdb`) or a Kerberos keytab
   (`/etc/krb5.keytab` by default). Protecting those files with the host's normal filesystem
   permissions is the host's responsibility, outside the module's scope (the
@@ -433,7 +433,7 @@ running it without data is a no-op; the playbook header documents the data
 structure. Keep user passwords in Ansible Vault.
 
 A companion playbook, [`playbooks/samba_dns.yml`](playbooks/samba_dns.yml),
-manages DNS the same way — zones then records, in dependency order:
+manages DNS the same way (zones then records, in dependency order):
 
 ```bash
 ansible-playbook jomrr.samba.samba_dns \
@@ -467,12 +467,12 @@ molecule test                       # the default (object-module) scenario
 Integration runs against rootless Podman across Debian, Fedora, openSUSE and
 Ubuntu. There are five Molecule scenarios; select one with `-s`:
 
-- `default` — the object/info modules against a single provisioned DC
-- `provision` — `samba_provision`
-- `join_dc` — `samba_join_dc` (multi-host: DC + joining DC pairs)
-- `join_member` — `samba_join_member` (multi-host; proves RFC2307 uid resolution
+- `default` - the object/info modules against a single provisioned DC
+- `provision` - `samba_provision`
+- `join_dc` - `samba_join_dc` (multi-host: DC + joining DC pairs)
+- `join_member` - `samba_join_member` (multi-host; proves RFC2307 uid resolution
   via winbind)
-- `join_sssd` — `samba_join_sssd` (multi-host; proves RFC2307 uid resolution via
+- `join_sssd` - `samba_join_sssd` (multi-host; proves RFC2307 uid resolution via
   SSSD)
 
 ```bash

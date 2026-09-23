@@ -1,6 +1,6 @@
 ---
 # ============================================================================
-# DISABLED — kept as a template, not executed by GitHub.
+# DISABLED: kept as a template, not executed by GitHub.
 #
 # GitHub Actions only runs workflow files ending in .yml/.yaml, so this
 # ".yml.disabled" file never triggers. Releases currently run LOCALLY via

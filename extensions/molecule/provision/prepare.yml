@@ -2,7 +2,7 @@
 # Prepare an UN-provisioned Samba host for the samba_provision scenario: install
 # the packages and set up the environment (idmap range so provisioning fits the
 # rootless user namespace, /etc/hosts FQDN, stock smb.conf removed), but do NOT
-# run domain provisioning — that is samba_provision's job in converge. This is
+# run domain provisioning; that is samba_provision's job in converge. This is
 # the package/environment subset of the default scenario's prepare.yml, minus
 # the provision, krb5.conf, daemon, readiness-gate and seeding steps.
 - name: Prepare un-provisioned Samba host
