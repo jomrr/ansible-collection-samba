@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Pure, samba-free planner for samba_schema_extension.
@@ -45,7 +44,7 @@ def _lower(values):
 def _reconcile(current, dn, desired, label):
     """An add when the entry is missing, a modify of what differs, or None."""
     if current is None:
-        return {"action": "add", "dn": dn, "values": desired, "label": "add %s" % label}
+        return {"action": "add", "dn": dn, "values": desired, "label": f"add {label}"}
     replace = {}
     add = {}
     for name, values in desired.items():
@@ -61,7 +60,7 @@ def _reconcile(current, dn, desired, label):
     if not replace and not add:
         return None
     changed = ", ".join(sorted(list(replace) + list(add)))
-    return {"action": "modify", "dn": dn, "replace": replace, "add": add, "label": "modify %s (%s)" % (label, changed)}
+    return {"action": "modify", "dn": dn, "replace": replace, "add": add, "label": f"modify {label} ({changed})"}
 
 
 def plan(extension, reader):
@@ -77,32 +76,32 @@ def plan(extension, reader):
     for attribute in spec["attributes"]:
         desired = _values(attribute, objectClass="attributeSchema")
         current = reader.find_schema(attribute["lDAPDisplayName"], list(desired))
-        dn = "CN=%s,%s" % (attribute["cn"], schema_dn)
-        operation = _reconcile(current, dn, desired, "attributeSchema %s" % attribute["lDAPDisplayName"])
+        dn = "CN={},{}".format(attribute["cn"], schema_dn)
+        operation = _reconcile(current, dn, desired, "attributeSchema {}".format(attribute["lDAPDisplayName"]))
         if operation:
             first.append(operation)
-    rights_dn = "CN=Extended-Rights,%s" % reader.config_dn()
+    rights_dn = f"CN=Extended-Rights,{reader.config_dn()}"
     for right in spec["rights"]:
         desired = _values(right, objectClass="controlAccessRight")
         current = reader.find_right(right["rightsGuid"], list(desired))
-        dn = "CN=%s,%s" % (right["cn"], rights_dn)
-        operation = _reconcile(current, dn, desired, "controlAccessRight %s" % right["cn"])
+        dn = "CN={},{}".format(right["cn"], rights_dn)
+        operation = _reconcile(current, dn, desired, "controlAccessRight {}".format(right["cn"]))
         if operation:
             first.append(operation)
     classes = []
     for definition in spec["classes"]:
-        dn = "CN=%s,%s" % (definition["cn"], schema_dn)
+        dn = "CN={},{}".format(definition["cn"], schema_dn)
         desired = _values(definition, objectClass="classSchema", defaultObjectCategory=dn)
         current = reader.find_schema(definition["lDAPDisplayName"], list(desired))
-        operation = _reconcile(current, dn, desired, "classSchema %s" % definition["lDAPDisplayName"])
+        operation = _reconcile(current, dn, desired, "classSchema {}".format(definition["lDAPDisplayName"]))
         if operation:
             classes.append(operation)
     links = []
     for class_name, prop, values in spec["links"]:
         current = reader.find_schema(class_name, [prop])
         if current is None:
-            raise SambaSchemaError("class '%s' is not in the schema" % class_name)
-        operation = _reconcile(current, current["_dn"], {prop: list(values)}, "classSchema %s" % class_name)
+            raise SambaSchemaError(f"class '{class_name}' is not in the schema")
+        operation = _reconcile(current, current["_dn"], {prop: list(values)}, f"classSchema {class_name}")
         if operation:
             links.append(operation)
     return [("attributes and rights", first), ("classes", classes), ("class links", links)]

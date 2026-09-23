@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the shared DN/move I/O (samba_ldb helpers + SambaUserIO move).
@@ -14,9 +13,8 @@ from __future__ import annotations
 import types
 
 import pytest
-
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_user
 
 
@@ -51,7 +49,7 @@ class FakeDn:
 
     def set_component(self, num, name, value):
         self.set_calls.append((num, name, value))
-        self.text = "%s=%s" % (name, value)
+        self.text = f"{name}={value}"
 
     def add_base(self, parent):
         self.text = self.text + "," + parent.text

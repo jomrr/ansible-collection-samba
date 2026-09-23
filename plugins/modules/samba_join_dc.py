@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to join a host as an additional Samba AD DC via the bindings."""
@@ -182,18 +180,17 @@ output:
 
 import importlib
 import logging
-import traceback
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
-
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_dc_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_local
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import (
     KERBEROS_CHOICES,
     apply_kerberos_policy,
     fail_without_bindings,
+    run_or_fail,
 )
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_local
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_dc_logic as logic
 
 
 class SambaJoinDcIO:
@@ -272,9 +269,7 @@ class SambaJoinDcIO:
                     dns_backend=params["dns_backend"],
                 )
         except Exception as exc:
-            raise logic.SambaJoinDcError(
-                "joining the domain failed: %s%s" % (to_native(exc), transcript.tail())
-            )
+            raise logic.SambaJoinDcError(f"joining the domain failed: {to_native(exc)}{transcript.tail()}") from exc
         self.output = transcript.lines
 
         domain = samba_local.read_local_domain()
@@ -285,32 +280,24 @@ class SambaJoinDcIO:
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        realm=dict(type="str", required=True),
-        server=dict(type="str", required=True),
-        bind_username=dict(type="str", required=True),
-        bind_password=dict(type="str", no_log=True),
-        domain=dict(type="str"),
-        netbios_name=dict(type="str"),
-        site=dict(type="str"),
-        dns_backend=dict(type="str", default="SAMBA_INTERNAL", choices=logic.DNS_BACKENDS),
-        use_kerberos=dict(type="str", default="required", choices=KERBEROS_CHOICES),
-        state=dict(type="str", default="present", choices=["present"]),
-    )
+    argument_spec = {
+        "realm": {"type": "str", "required": True},
+        "server": {"type": "str", "required": True},
+        "bind_username": {"type": "str", "required": True},
+        "bind_password": {"type": "str", "no_log": True},
+        "domain": {"type": "str"},
+        "netbios_name": {"type": "str"},
+        "site": {"type": "str"},
+        "dns_backend": {"type": "str", "default": "SAMBA_INTERNAL", "choices": logic.DNS_BACKENDS},
+        "use_kerberos": {"type": "str", "default": "required", "choices": KERBEROS_CHOICES},
+        "state": {"type": "str", "default": "present", "choices": ["present"]},
+    }
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     fail_without_bindings(module)
     join_io = SambaJoinDcIO(module)
 
-    try:
-        result = logic.run(module.params, module.check_mode, join_io)
-    except logic.SambaJoinDcError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_join_dc failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    result = run_or_fail(module, "samba_join_dc", (logic.SambaJoinDcError,), lambda: logic.run(module.params, module.check_mode, join_io))
 
     if join_io.output is not None:
         result["output"] = join_io.output

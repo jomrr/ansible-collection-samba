@@ -505,6 +505,88 @@
           - (_zones.zones | selectattr('name', 'equalto', 'ztest.example.com') | first).replication == "domain"
           - (_zones.zones | selectattr('name', 'equalto', '2.0.192.in-addr.arpa') | first).reverse is true
 
+    # Aging options: samba_dns_zone_info reads them from the directory,
+    # samba-tool reads them back through the dnsserver RPC.
+    - name: Verify | Read the zone converge created with aging
+      jomrr.samba.samba_dns_zone_info:
+        name: zaging.example.com
+      register: _zaging
+
+    - name: Verify | Read the seeded zone converge turned aging off on
+      jomrr.samba.samba_dns_zone_info:
+        name: zseedaging.example.com
+      register: _zseedaging
+
+    - name: Verify | samba-tool shows the aging options of the created zone
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - dns
+          - zoneinfo
+          - "{{ samba_fqdn }}"
+          - zaging.example.com
+          - "--username=Administrator"
+      environment:
+        PASSWD: "{{ samba_admin_password }}"
+      register: _zaging_zoneinfo
+      changed_when: false
+
+    - name: Verify | samba-tool shows the aging options of the seeded zone
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - dns
+          - zoneinfo
+          - "{{ samba_fqdn }}"
+          - zseedaging.example.com
+          - "--username=Administrator"
+      environment:
+        PASSWD: "{{ samba_admin_password }}"
+      register: _zseedaging_zoneinfo
+      changed_when: false
+
+    - name: Verify | Check mode with the converged options predicts no change
+      jomrr.samba.samba_dns_zone:
+        name: zaging.example.com
+        aging: true
+        norefresh_interval: 72
+        refresh_interval: 96
+      check_mode: true
+      register: _zaging_check_same
+
+    - name: Verify | Check mode with another interval predicts a change
+      jomrr.samba.samba_dns_zone:
+        name: zaging.example.com
+        refresh_interval: 120
+      check_mode: true
+      register: _zaging_check_other
+
+    - name: Verify | Read the zone again after the check-mode runs
+      jomrr.samba.samba_dns_zone_info:
+        name: zaging.example.com
+      register: _zaging_after_check
+
+    - name: Verify | The aging options match converge, samba-tool agrees and check mode wrote nothing
+      ansible.builtin.assert:
+        that:
+          - _zaging.zones[0].aging is true
+          - _zaging.zones[0].norefresh_interval == 72
+          - _zaging.zones[0].refresh_interval == 96
+          - _zaging_zoneinfo.stdout is search('fAging\\s+:\\s+TRUE')
+          - _zaging_zoneinfo.stdout is search('dwNoRefreshInterval\\s+:\\s+72\\b')
+          - _zaging_zoneinfo.stdout is search('dwRefreshInterval\\s+:\\s+96\\b')
+          # Only aging was managed on the seeded zone; samba-tool's intervals stay.
+          - _zseedaging.zones[0].aging is false
+          - _zseedaging.zones[0].norefresh_interval == 24
+          - _zseedaging.zones[0].refresh_interval == 48
+          - _zseedaging_zoneinfo.stdout is search('fAging\\s+:\\s+FALSE')
+          - _zseedaging_zoneinfo.stdout is search('dwNoRefreshInterval\\s+:\\s+24\\b')
+          - _zseedaging_zoneinfo.stdout is search('dwRefreshInterval\\s+:\\s+48\\b')
+          - _zaging_check_same is not changed
+          - _zaging_check_other is changed
+          - _zaging_check_other.zone.refresh_interval == 120
+          - _zaging_after_check.zones[0].refresh_interval == 96
+
     # The GSSAPI ticket lives in a MEMORY ccache and never on disk. Clear any
     # stray cache, run a module (which performs a GSSAPI bind), then assert no
     # krb5 credential cache file was left behind.

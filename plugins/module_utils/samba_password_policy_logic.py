@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Pure, samba-free logic for samba_password_policy and samba_password_settings.
@@ -75,7 +74,7 @@ PSO_CONTAINER_RDN = "CN=Password Settings Container,CN=System"
 
 def settings_argument_spec():
     """The ``settings`` suboptions, the same for the domain and for a PSO."""
-    return dict((name, dict(type="bool" if name in FLAG_BITS else "int")) for name in PSO_ATTRIBUTES)
+    return {name: {"type": "bool" if name in FLAG_BITS else "int"} for name in PSO_ATTRIBUTES}
 
 
 def _units(ticks, unit):
@@ -108,10 +107,10 @@ def decode(record, pso=False):
 def merge(current, requested):
     """Overlay the requested settings on the current ones and validate the result."""
     desired = dict(current)
-    desired.update(dict((name, value) for name, value in requested.items() if value is not None))
+    desired.update({name: value for name, value in requested.items() if value is not None})
     for name, value in desired.items():
         if name not in FLAG_BITS and value < 0:
-            raise SambaPasswordPolicyError("%s must not be negative" % name)
+            raise SambaPasswordPolicyError(f"{name} must not be negative")
     if desired["maximum_age_days"] and desired["minimum_age_days"] >= desired["maximum_age_days"]:
         raise SambaPasswordPolicyError("minimum_age_days must be less than maximum_age_days")
     return desired
@@ -148,11 +147,11 @@ def encode(requested, pso=False, flags=0):
 
 def inherited_pso_attributes(domain):
     """A new PSO's attributes copied from the domain policy (as samba-tool does)."""
-    attributes = dict(
-        (PSO_ATTRIBUTES[name], list(domain[attribute])) for name, attribute in DOMAIN_ATTRIBUTES.items()
-    )
+    attributes = {
+        PSO_ATTRIBUTES[name]: list(domain[attribute]) for name, attribute in DOMAIN_ATTRIBUTES.items()
+    }
     flags = int(domain[DOMAIN_FLAGS][0])
-    attributes.update(encode(dict((name, bool(flags & bit)) for name, bit in FLAG_BITS.items()), pso=True))
+    attributes.update(encode({name: bool(flags & bit) for name, bit in FLAG_BITS.items()}, pso=True))
     # The domain stores "until an administrator unlocks" as NEVER; a PSO stores 0.
     for name in ("lockout_duration_minutes", "lockout_window_minutes"):
         attribute = PSO_ATTRIBUTES[name]
@@ -165,10 +164,10 @@ def changed_attributes(current, attributes):
     """The attributes whose values differ from ``current`` (all of them for a new object)."""
     if current is None:
         return dict(attributes)
-    return dict(
-        (name, values) for name, values in attributes.items()
+    return {
+        name: values for name, values in attributes.items()
         if sorted(current.get(name, [])) != sorted(values)
-    )
+    }
 
 
 def run_domain(params, check_mode, io):

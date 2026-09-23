@@ -52,6 +52,7 @@
 #   samba_dns_zones:
 #     - {name: example.com, replication: domain}    # domain | forest
 #     - {name: 2.0.192.in-addr.arpa}                # a reverse zone
+#     - {name: dyn.example.com, aging: true, norefresh_interval: 168, refresh_interval: 168}
 #
 #   samba_dns_records:                   # each record names a zone created above;
 #                                        # `name` is relative to the zone (@ = apex)
@@ -85,6 +86,9 @@
       jomrr.samba.samba_dns_zone:
         name: "{{ zone.name }}"
         replication: "{{ zone.replication | default('domain') }}"
+        aging: "{{ zone.aging | default(omit) }}"
+        norefresh_interval: "{{ zone.norefresh_interval | default(omit) }}"
+        refresh_interval: "{{ zone.refresh_interval | default(omit) }}"
         state: present
       loop: "{{ samba_dns_zones | default([]) }}"
       loop_control:

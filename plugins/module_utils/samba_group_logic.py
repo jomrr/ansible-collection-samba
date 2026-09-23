@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Pure, samba-free logic for the ``samba_group`` module.
@@ -253,7 +252,10 @@ def build_diff(state, current, desired, planned, member_diff):
 
 
 def _undo_create(io, name, exc):
-    """Remove the group a failed create left behind and report the cause.
+    """Remove the group a failed create left behind; return the error to raise.
+
+    The caller raises the returned error from the original cause. If removing
+    the group fails too, that failure is raised here instead.
 
     LDAP offers no transactions (ldb's LDAP backend implements
     transaction_start/commit/cancel as no-ops), so a create is made
@@ -265,17 +267,14 @@ def _undo_create(io, name, exc):
     """
     current = io.read_current(name)
     if current is None:
-        raise SambaGroupError("creating group '%s' failed: %s" % (name, exc))
+        return SambaGroupError(f"creating group '{name}' failed: {exc}")
     try:
         io.delete(current["_dn"])
     except Exception as undo_exc:
         raise SambaGroupError(
-            "creating group '%s' failed: %s; removing the partially created object failed too: %s"
-            % (name, exc, undo_exc)
-        )
-    raise SambaGroupError(
-        "creating group '%s' failed: %s; the partially created object was removed" % (name, exc)
-    )
+            f"creating group '{name}' failed: {exc}; removing the partially created object failed too: {undo_exc}"
+        ) from undo_exc
+    return SambaGroupError(f"creating group '{name}' failed: {exc}; the partially created object was removed")
 
 
 def run(params, check_mode, io):
@@ -323,7 +322,7 @@ def run(params, check_mode, io):
     # caught by move().
     if state == "present" and path is not None and (current is None or move_needed) \
             and not io.parent_exists(path):
-        raise SambaGroupError("path '%s' does not exist; create it first" % path)
+        raise SambaGroupError(f"path '{path}' does not exist; create it first")
 
     action = planned["action"]
     if action == "none" and (member_planned or move_needed):
@@ -374,10 +373,10 @@ def run(params, check_mode, io):
             # A concurrent create: the object is not ours, nothing to undo.
             raise
         except Exception as exc:
-            _undo_create(io, name, exc)
+            raise _undo_create(io, name, exc) from exc
         current = io.read_current(name)
         if current is None:
-            raise SambaGroupError("group '%s' could not be read back after creation" % name)
+            raise SambaGroupError(f"group '{name}' could not be read back after creation")
         # newgroup placed the group under path; only the domain root, which
         # the relative container form cannot express, leaves a move to do.
         move_needed = io.needs_move(current["_dn"], path)
@@ -410,7 +409,7 @@ def run(params, check_mode, io):
                 member_changed = True
     except Exception as exc:
         if created:
-            _undo_create(io, name, exc)
+            raise _undo_create(io, name, exc) from exc
         raise
 
     # Honest changed: scalar/move changes are real; member ops may have been

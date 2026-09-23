@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_ou orchestration.
@@ -9,7 +8,6 @@ must also not require samba."""
 from __future__ import annotations
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_ou
 
@@ -30,7 +28,7 @@ class FakeIO:
 
     def create_ou(self, name, path, description):
         self.calls.append(("create_ou", name, path, description))
-        self.current = {"description": description, "_dn": "OU=%s,%s" % (name, path)}
+        self.current = {"description": description, "_dn": f"OU={name},{path}"}
 
     def set_description(self, dn, description):
         self.calls.append(("set_description", dn, description))
@@ -121,7 +119,7 @@ def test_parent_missing_fails():
     class NoParentIO(FakeIO):
         def create_ou(self, name, path, description):
             self.calls.append(("create_ou", name, path, description))
-            raise logic.SambaOuError("parent path '%s' does not exist" % path)
+            raise logic.SambaOuError(f"parent path '{path}' does not exist")
 
     fake = NoParentIO(current=None)
     with pytest.raises(logic.SambaOuError):

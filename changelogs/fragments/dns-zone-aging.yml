@@ -1,0 +1,7 @@
+---
+minor_changes:
+  - samba_dns_zone - C(aging), C(norefresh_interval) and C(refresh_interval) manage a zone's record aging like C(samba-tool dns zoneoptions).
+  - samba_dns_zone_info - each zone reports its C(aging), C(norefresh_interval) and C(refresh_interval).
+  - samba_dns_zone - a refused zone property write names the property and the zone.
+trivial:
+  - Add C(make ruff) and C(make mypy); clean up the code for ruff's default rules.

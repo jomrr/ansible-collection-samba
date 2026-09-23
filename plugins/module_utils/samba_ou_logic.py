@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Pure, samba-free logic for the ``samba_ou`` module.
@@ -107,7 +106,7 @@ def run(params, check_mode, io):
     # fails exactly where a real run would. Read-only; only a create needs it.
     # The narrow race where the parent vanishes afterwards is caught by create_ou().
     if planned["action"] == "create" and not io.parent_exists(path):
-        raise SambaOuError("path '%s' does not exist; create it first" % path)
+        raise SambaOuError(f"path '{path}' does not exist; create it first")
 
     result = {
         "changed": planned["changed"],
@@ -145,7 +144,7 @@ def run(params, check_mode, io):
         current = io.read_current(name, path)
 
     if current is None:
-        raise SambaOuError("OU '%s' could not be read back after creation" % name)
+        raise SambaOuError(f"OU '{name}' could not be read back after creation")
 
     # On create the description was already set via create_ou; only an existing
     # OU needs a separate modify.

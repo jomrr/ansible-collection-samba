@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the MIT keytab principal reader (pure standard library)."""
@@ -8,7 +7,6 @@ from __future__ import annotations
 import struct
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_keytab
 
 

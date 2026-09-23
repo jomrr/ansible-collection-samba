@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to query DNS zones from a Samba AD DC."""
@@ -22,8 +20,9 @@ description:
   - This module is read-only; it never changes the directory and always reports
     C(changed=false).
   - The returned zone fields mirror the parameters of
-    C(jomrr.samba.samba_dns_zone) (C(name), C(replication)), so a returned entry
-    can be fed back as that module's input.
+    C(jomrr.samba.samba_dns_zone) (C(name), C(replication), C(aging),
+    C(norefresh_interval), C(refresh_interval)), so a returned entry can be fed
+    back as that module's input.
 author:
   - Jonas Mauer (@jomrr)
 requirements:
@@ -47,6 +46,9 @@ notes:
     topology.
   - The replication scope is derived from the directory partition the zone lives
     in (ForestDnsZones means C(forest), otherwise C(domain)).
+  - The aging options are the values stored in C(dNSProperty); a missing
+    property reads as C(0) or C(false). C(samba-tool dns zoneinfo) shows the
+    DC's default instead of a stored C(0).
 """
 
 EXAMPLES = r"""
@@ -63,6 +65,10 @@ EXAMPLES = r"""
 - name: Fetch all DNS zones
   jomrr.samba.samba_dns_zone_info:
   register: all_zones
+
+- name: List the zones with record aging enabled
+  ansible.builtin.debug:
+    msg: "{{ all_zones.zones | selectattr('aging') | map(attribute='name') | list }}"
 
 - name: Show the names and replication scope of every zone
   ansible.builtin.debug:
@@ -89,6 +95,24 @@ zones:
       returned: always
       type: str
       sample: domain
+    aging:
+      description: Whether record aging is enabled.
+      returned: always
+      type: bool
+      sample: false
+      version_added: 2.1.0
+    norefresh_interval:
+      description: The stored no-refresh interval in hours; C(0) selects the DC's default.
+      returned: always
+      type: int
+      sample: 168
+      version_added: 2.1.0
+    refresh_interval:
+      description: The stored refresh interval in hours; C(0) selects the DC's default.
+      returned: always
+      type: int
+      sample: 168
+      version_added: 2.1.0
     reverse:
       description:
         - Whether the zone is a reverse-lookup zone (named under C(in-addr.arpa)
@@ -103,14 +127,10 @@ zones:
       sample: DC=example.com,CN=MicrosoftDNS,DC=DomainDnsZones,DC=example,DC=com
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_zone_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 
 def query(samdb, name):
@@ -123,26 +143,20 @@ def query(samdb, name):
     is escaped before it enters the search filter by the shared helper.
     """
     entries = samba_dns_io.list_zone_entries(samdb, name)
-    return [logic.zone_info(zone_name, zone_dn) for zone_name, zone_dn in entries]
+    return [logic.zone_info(zone_name, zone_dn, stored) for zone_name, zone_dn, stored in entries]
 
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        name=dict(type="str"),
-    )
+    argument_spec = {
+        "name": {"type": "str"},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
 
-    try:
-        zones = query(samdb, module.params["name"])
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_dns_zone_info failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    zones = run_or_fail(module, "samba_dns_zone_info", (), lambda: query(samdb, module.params["name"]))
 
     module.exit_json(changed=False, zones=zones)
 

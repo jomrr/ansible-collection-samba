@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to manage groups in a Samba AD DC via the python bindings."""
@@ -223,15 +221,10 @@ group:
         - CN=Jane Doe,CN=Users,DC=example,DC=com
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_io, samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 
 class SambaGroupIO(samba_ldb.SambaObjectIO):
@@ -248,7 +241,7 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
     def read_current(self, name):
         """Return the normalized current state of group ``name`` or ``None``."""
         ldb = samba_ldb.load_ldb()
-        expression = "(&(objectClass=group)(sAMAccountName=%s))" % ldb.binary_encode(name)
+        expression = f"(&(objectClass=group)(sAMAccountName={ldb.binary_encode(name)}))"
         res = self.samdb.search(
             base=self.samdb.domain_dn(),
             scope=ldb.SCOPE_SUBTREE,
@@ -288,15 +281,15 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
             try:
                 dn = samba_ldb.parse_dn(self.samdb, member)
             except ValueError:
-                raise logic.SambaGroupError("member '%s' is not a valid distinguished name" % member)
+                raise logic.SambaGroupError(f"member '{member}' is not a valid distinguished name")
             stored = samba_ldb.lookup_dn(self.samdb, dn)
             if stored is not None:
                 found[member.lower()] = stored
         for start in range(0, len(names), self._RESOLVE_BATCH):
             batch = names[start:start + self._RESOLVE_BATCH]
-            expression = "(|%s)" % "".join(
-                "(sAMAccountName=%s)" % ldb.binary_encode(member) for member in batch
-            )
+            expression = "(|{})".format("".join(
+                f"(sAMAccountName={ldb.binary_encode(member)})" for member in batch
+            ))
             res = self.samdb.search(
                 base=self.samdb.domain_dn(),
                 scope=ldb.SCOPE_SUBTREE,
@@ -308,7 +301,7 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
                 found[account.lower()] = str(message.dn)
         missing = [member for member in wanted if member.lower() not in found]
         if missing:
-            raise logic.SambaGroupError("members not found: %s" % ", ".join(missing))
+            raise logic.SambaGroupError("members not found: {}".format(", ".join(missing)))
         return [found[member.lower()] for member in members]
 
     def create_group(self, name, group_type_value, description, path, gid_number):
@@ -327,7 +320,7 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
                 raise logic.SambaGroupError(
-                    "group '%s' already exists (created concurrently?)" % name
+                    f"group '{name}' already exists (created concurrently?)"
                 )
             raise
 
@@ -375,7 +368,7 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
         except ldb.LdbError as err:
             if err.args[0] in (ldb.ERR_UNWILLING_TO_PERFORM, ldb.ERR_CONSTRAINT_VIOLATION):
                 raise logic.SambaGroupError(
-                    "samba rejected the scope/category change for group '%s'" % dn
+                    f"samba rejected the scope/category change for group '{dn}'"
                 )
             raise
 
@@ -402,38 +395,30 @@ class SambaGroupIO(samba_ldb.SambaObjectIO):
             if err.args[0] == already:
                 return False
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                raise logic.SambaGroupError("group '%s' vanished before its membership could be changed" % group_dn)
+                raise logic.SambaGroupError(f"group '{group_dn}' vanished before its membership could be changed")
             raise
 
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        name=dict(type="str", required=True, aliases=["samaccountname"]),
-        scope=dict(type="str", choices=["global", "domain_local", "universal"]),
-        category=dict(type="str", choices=["security", "distribution"]),
-        description=dict(type="str"),
-        gid_number=dict(type="int"),
-        members=dict(type="list", elements="str"),
-        members_purge=dict(type="bool", default=False),
-        path=dict(type="str"),
-        state=dict(type="str", default="present", choices=["present", "absent"]),
-    )
+    argument_spec = {
+        "name": {"type": "str", "required": True, "aliases": ["samaccountname"]},
+        "scope": {"type": "str", "choices": ["global", "domain_local", "universal"]},
+        "category": {"type": "str", "choices": ["security", "distribution"]},
+        "description": {"type": "str"},
+        "gid_number": {"type": "int"},
+        "members": {"type": "list", "elements": "str"},
+        "members_purge": {"type": "bool", "default": False},
+        "path": {"type": "str"},
+        "state": {"type": "str", "default": "present", "choices": ["present", "absent"]},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
     group_io = SambaGroupIO(samdb)
 
-    try:
-        result = logic.run(module.params, module.check_mode, group_io)
-    except logic.SambaGroupError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_group failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    result = run_or_fail(module, "samba_group", (logic.SambaGroupError,), lambda: logic.run(module.params, module.check_mode, group_io))
 
     module.exit_json(**result)
 

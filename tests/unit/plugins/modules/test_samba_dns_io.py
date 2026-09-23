@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
-"""Unit tests for the samba_dns_io record build/extract mapping.
+"""Unit tests for the samba_dns_io record mapping and zone property reads.
 
 A fake ``dnsp`` module is injected (via samba_dns_io.load_dnsp), so these run
 without the samba bindings while exercising the per-type record mapping."""
@@ -9,9 +8,7 @@ without the samba bindings while exercising the per-type record mapping."""
 from __future__ import annotations
 
 import pytest
-
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io, samba_ldb
 
 
 class FakeDnsp:
@@ -28,6 +25,15 @@ class FakeDnsp:
     DNS_TYPE_SRV = 33
     DNS_TYPE_TOMBSTONE = 0
     DNS_RANK_ZONE = 240
+    DSPROPERTY_ZONE_TYPE = 0x01
+    DSPROPERTY_ZONE_NOREFRESH_INTERVAL = 0x10
+    DSPROPERTY_ZONE_REFRESH_INTERVAL = 0x20
+    DSPROPERTY_ZONE_AGING_STATE = 0x40
+
+    class DnsProperty:
+        def __init__(self, prop_id, data):
+            self.id = prop_id
+            self.data = data
 
     class DnssrvRpcRecord:
         def __init__(self):
@@ -149,3 +155,34 @@ def test_read_node_specs_treats_tombstoned_node_as_absent(monkeypatch):
     assert samdb.captured["scope"] == FakeLdb.SCOPE_BASE
     assert samdb.captured["expression"] == samba_dns_io.LIVE_NODE_FILTER
     assert "(!(dNSTombstoned=TRUE))" in samdb.captured["expression"]
+
+
+class FakeNdr:
+    """Unpacks a ``(id, data)`` pair as a DnsProperty; any other value is malformed."""
+
+    @staticmethod
+    def ndr_unpack(struct, value):
+        try:
+            prop_id, data = value
+        except ValueError:
+            raise RuntimeError(11, "Buffer Size Error") from None
+        return struct(prop_id, data)
+
+
+def test_decode_zone_properties_reads_the_aging_properties(monkeypatch):
+    monkeypatch.setattr(samba_dns_io, "load_ndr", lambda: FakeNdr)
+    stored = samba_dns_io.decode_zone_properties([
+        (FakeDnsp.DSPROPERTY_ZONE_TYPE, 1),
+        b"\x00",
+        (FakeDnsp.DSPROPERTY_ZONE_NOREFRESH_INTERVAL, 24),
+        (FakeDnsp.DSPROPERTY_ZONE_REFRESH_INTERVAL, 48),
+        (FakeDnsp.DSPROPERTY_ZONE_AGING_STATE, 1),
+        (FakeDnsp.DSPROPERTY_ZONE_NOREFRESH_INTERVAL, 72),
+    ])
+    # As the DNS server reads them: other properties are ignored, a malformed
+    # value is skipped and a later value for the same property wins.
+    assert stored == {"norefresh_interval": 72, "refresh_interval": 48, "aging": 1}
+
+
+def test_decode_zone_properties_of_a_zone_without_the_attribute_is_empty():
+    assert samba_dns_io.decode_zone_properties(None) == {}

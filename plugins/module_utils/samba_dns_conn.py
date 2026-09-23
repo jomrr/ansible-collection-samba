@@ -1,19 +1,20 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """DNS management RPC connection and zone operations for samba_dns_zone.
 
-Zone create/delete go through the C(dnsserver) RPC (C(DnssrvOperation2)) - unlike
-DNS records, which use the local LDB. The RPC is authenticated with the same
-explicit caller credentials as the LDAP connection (GSSAPI, in-memory ccache;
-the machine-account path is gone) and is sealed. All ``samba`` imports are lazy.
+Zone create/delete and zone properties go through the C(dnsserver) RPC
+(C(DnssrvOperation2)) - unlike DNS records, which use the local LDB. The RPC is
+authenticated with the same explicit caller credentials as the LDAP connection
+(GSSAPI, in-memory ccache) and is sealed. All ``samba`` imports are lazy.
 """
 
 from __future__ import annotations
 
 import importlib
+from typing import Any
 
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_conn
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_conn, samba_ldb
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_zone_logic as logic
 
 
 def _load(name):
@@ -34,11 +35,11 @@ def connect_dnsserver(module):
     creds = samba_conn.build_credentials(module)
     server = module.params["server"]
     try:
-        conn = dnsserver.dnsserver("ncacn_ip_tcp:%s[seal]" % server, load_parm, creds)
+        conn = dnsserver.dnsserver(f"ncacn_ip_tcp:{server}[seal]", load_parm, creds)
     except RuntimeError:
         module.fail_json(
-            msg="could not connect to the DNS RPC server at '%s'; verify the "
-                "server, credentials and realm" % server
+            msg=f"could not connect to the DNS RPC server at '{server}'; verify the "
+                "server, credentials and realm"
         )
     return conn, server
 
@@ -73,12 +74,28 @@ def create_zone(conn, server, name, replication):
             return False
         raise
 
-    name_and_param = dnsserver.DNS_RPC_NAME_AND_PARAM()
-    name_and_param.pszNodeName = "AllowUpdate"
-    name_and_param.dwParam = dnsp.DNS_ZONE_UPDATE_SECURE
-    conn.DnssrvOperation2(version, 0, server, name, 0, "ResetDwordProperty",
-                          dnsserver.DNSSRV_TYPEID_NAME_AND_PARAM, name_and_param)
+    set_zone_property(conn, server, name, "AllowUpdate", dnsp.DNS_ZONE_UPDATE_SECURE)
     return True
+
+
+def set_zone_property(conn: Any, server: str, zone: str, property_name: str, value: int) -> None:
+    """Set one DWORD zone property through ``ResetDwordProperty``.
+
+    The one write path for zone properties, the operation ``samba-tool dns
+    zoneoptions`` uses. A refusal is reported with the property and the zone.
+    """
+    dnsserver = _load("samba.dcerpc.dnsserver")
+    werror_error = _load("samba").WERRORError
+    name_and_param = dnsserver.DNS_RPC_NAME_AND_PARAM()
+    name_and_param.pszNodeName = property_name
+    name_and_param.dwParam = value
+    try:
+        conn.DnssrvOperation2(dnsserver.DNS_CLIENT_VERSION_LONGHORN, 0, server, zone, 0, "ResetDwordProperty",
+                              dnsserver.DNSSRV_TYPEID_NAME_AND_PARAM, name_and_param)
+    except werror_error as err:
+        raise logic.SambaDnsZoneError(
+            f"could not set {property_name} to {value} on zone '{zone}': {samba_ldb.error_text(err)}"
+        ) from err
 
 
 def delete_zone(conn, server, name):

@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to manage users in a Samba AD DC via the python bindings."""
@@ -298,15 +296,12 @@ user:
       sample: true
 """
 
-import traceback
+from typing import ClassVar
 
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb, samba_user_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 
 class SambaUserIO(samba_ldb.SambaObjectIO):
@@ -326,7 +321,7 @@ class SambaUserIO(samba_ldb.SambaObjectIO):
         ldb = samba_ldb.load_ldb()
         # objectCategory=person keeps computer accounts (also objectClass=user)
         # out, the same match samba_user_info uses.
-        expression = "(&(objectCategory=person)(objectClass=user)(sAMAccountName=%s))" % ldb.binary_encode(username)
+        expression = f"(&(objectCategory=person)(objectClass=user)(sAMAccountName={ldb.binary_encode(username)}))"
         res = self.samdb.search(
             base=self.samdb.domain_dn(),
             scope=ldb.SCOPE_SUBTREE,
@@ -339,7 +334,7 @@ class SambaUserIO(samba_ldb.SambaObjectIO):
 
     #: Module attributes samba's ``newuser`` sets on the add, mapped to its
     #: keyword arguments (the logic's ``CREATE_ATTRS``).
-    _NEWUSER_KWARGS = {
+    _NEWUSER_KWARGS: ClassVar[dict[str, str]] = {
         "given_name": "givenname",
         "surname": "surname",
         "email": "mailaddress",
@@ -367,7 +362,7 @@ class SambaUserIO(samba_ldb.SambaObjectIO):
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
                 raise logic.SambaUserError(
-                    "user '%s' already exists (created concurrently?)" % username
+                    f"user '{username}' already exists (created concurrently?)"
                 )
             raise
 
@@ -440,53 +435,45 @@ class SambaUserIO(samba_ldb.SambaObjectIO):
         message = ldb.Message()
         message.dn = ldb.Dn(self.samdb, dn)
         message["unicodePwd"] = ldb.MessageElement(
-            ('"%s"' % password).encode("utf-16-le"), ldb.FLAG_MOD_REPLACE, "unicodePwd"
+            (f'"{password}"').encode("utf-16-le"), ldb.FLAG_MOD_REPLACE, "unicodePwd"
         )
         try:
             self._modify(message, dn)
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_CONSTRAINT_VIOLATION:
                 raise logic.SambaUserError(
-                    "the domain password policy rejected the new password for '%s'" % dn
+                    f"the domain password policy rejected the new password for '{dn}'"
                 )
             raise
 
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        username=dict(type="str", required=True, aliases=["name", "samaccountname"]),
-        given_name=dict(type="str"),
-        surname=dict(type="str"),
-        display_name=dict(type="str"),
-        email=dict(type="str"),
-        description=dict(type="str"),
-        uid_number=dict(type="int"),
-        gid_number=dict(type="int"),
-        unix_home_directory=dict(type="str"),
-        login_shell=dict(type="str"),
-        gecos=dict(type="str"),
-        enabled=dict(type="bool"),
-        password=dict(type="str", no_log=True),
-        update_password=dict(type="str", default="on_create", choices=["on_create", "always"]),
-        path=dict(type="str"),
-        state=dict(type="str", default="present", choices=["present", "absent"]),
-    )
+    argument_spec = {
+        "username": {"type": "str", "required": True, "aliases": ["name", "samaccountname"]},
+        "given_name": {"type": "str"},
+        "surname": {"type": "str"},
+        "display_name": {"type": "str"},
+        "email": {"type": "str"},
+        "description": {"type": "str"},
+        "uid_number": {"type": "int"},
+        "gid_number": {"type": "int"},
+        "unix_home_directory": {"type": "str"},
+        "login_shell": {"type": "str"},
+        "gecos": {"type": "str"},
+        "enabled": {"type": "bool"},
+        "password": {"type": "str", "no_log": True},
+        "update_password": {"type": "str", "default": "on_create", "choices": ["on_create", "always"]},
+        "path": {"type": "str"},
+        "state": {"type": "str", "default": "present", "choices": ["present", "absent"]},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
     user_io = SambaUserIO(samdb)
 
-    try:
-        result = logic.run(module.params, module.check_mode, user_io)
-    except logic.SambaUserError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_user failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    result = run_or_fail(module, "samba_user", (logic.SambaUserError,), lambda: logic.run(module.params, module.check_mode, user_io))
 
     module.exit_json(**result)
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the read-only samba_dns_record_info module.
@@ -9,10 +8,8 @@ Importing the module must also not require samba."""
 from __future__ import annotations
 
 import pytest
-
 from ansible.module_utils import basic
 from ansible.module_utils.testing import patch_module_args
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_dns_record_info as info
@@ -115,9 +112,8 @@ def _run_main(monkeypatch, check_mode):
         "server": "dc.example.com", "bind_username": "Administrator", "bind_password": "secret",
         "zone": "example.com", "name": "www", "_ansible_check_mode": check_mode,
     }
-    with patch_module_args(args):
-        with pytest.raises(AnsibleExitJson) as raised:
-            info.main()
+    with patch_module_args(args), pytest.raises(AnsibleExitJson) as raised:
+        info.main()
     return raised.value.args[0]
 
 

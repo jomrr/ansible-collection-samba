@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to query DNS records from a Samba AD DC."""
@@ -139,14 +137,10 @@ records:
       sample: 389
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 #: The per-type structured fields a record spec may carry, mirroring the
 #: samba_dns_record parameters.
@@ -181,7 +175,7 @@ def query(samdb, zone, name, rtype):
     """
     zone_dn = samba_dns_io.find_zone_dn(samdb, zone)
     if zone_dn is None:
-        raise logic.SambaDnsRecordError("zone '%s' does not exist" % zone)
+        raise logic.SambaDnsRecordError(f"zone '{zone}' does not exist")
 
     if name is not None:
         specs = samba_dns_io.read_name_specs(samdb, zone_dn, name) or []
@@ -197,25 +191,20 @@ def query(samdb, zone, name, rtype):
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        zone=dict(type="str", required=True),
-        name=dict(type="str"),
-        type=dict(type="str", choices=logic.TYPE_CHOICES),
-    )
+    argument_spec = {
+        "zone": {"type": "str", "required": True},
+        "name": {"type": "str"},
+        "type": {"type": "str", "choices": logic.TYPE_CHOICES},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
 
-    try:
-        records = query(samdb, module.params["zone"], module.params["name"], module.params["type"])
-    except logic.SambaDnsRecordError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_dns_record_info failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    records = run_or_fail(
+        module, "samba_dns_record_info", (logic.SambaDnsRecordError,),
+        lambda: query(samdb, module.params["zone"], module.params["name"], module.params["type"]),
+    )
 
     module.exit_json(changed=False, records=records)
 

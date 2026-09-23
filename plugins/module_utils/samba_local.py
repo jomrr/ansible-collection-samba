@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Shared local-directory helper for the setup modules (samba_provision,
@@ -52,7 +51,7 @@ class Transcript(contextlib.redirect_stdout):
         lines = self.lines[-count:]
         if not lines:
             return ""
-        return "; samba reported: %s" % " | ".join(lines)
+        return "; samba reported: {}".format(" | ".join(lines))
 
 
 def read_local_domain():
@@ -88,12 +87,11 @@ def read_local_domain():
         cause = samba_ldb.error_text(exc)
         if isinstance(exc, ldb.LdbError) and exc.args[0] == ldb.ERR_INSUFFICIENT_ACCESS_RIGHTS:
             raise LocalSamdbError(
-                "a Samba database exists at '%s' but this process (uid %d) is not allowed to "
-                "open it: %s; run the module with the privileges of the Samba installation"
-                % (path, os.geteuid(), cause)
-            )
+                f"a Samba database exists at '{path}' but this process (uid {os.geteuid()}) is not allowed to "
+                f"open it: {cause}; run the module with the privileges of the Samba installation"
+            ) from exc
         raise LocalSamdbError(
-            "a Samba database exists at '%s' but could not be opened as an AD DC; "
-            "the host appears partially provisioned or corrupt: %s" % (path, cause)
-        )
+            f"a Samba database exists at '{path}' but could not be opened as an AD DC; "
+            f"the host appears partially provisioned or corrupt: {cause}"
+        ) from exc
     return {"domaindn": domaindn, "domainsid": domainsid, "dnsdomain": dnsdomain}

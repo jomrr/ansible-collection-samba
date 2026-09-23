@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to provision a Samba AD DC via the native python bindings."""
@@ -174,14 +172,12 @@ output:
 
 import importlib
 import logging
-import traceback
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import fail_without_bindings
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_local
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_provision_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import fail_without_bindings, run_or_fail
 
 
 class SambaProvisionIO:
@@ -265,9 +261,7 @@ class SambaProvisionIO:
                     lp=load_parm,
                 )
         except Exception as exc:
-            raise logic.SambaProvisionError(
-                "provisioning the domain failed: %s%s" % (to_native(exc), transcript.tail())
-            )
+            raise logic.SambaProvisionError(f"provisioning the domain failed: {to_native(exc)}{transcript.tail()}") from exc
         self.output = transcript.lines
 
         return {"domaindn": result.domaindn, "domainsid": str(result.domainsid)}
@@ -275,31 +269,23 @@ class SambaProvisionIO:
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        realm=dict(type="str", required=True),
-        domain=dict(type="str", required=True),
-        hostname=dict(type="str"),
-        admin_password=dict(type="str", no_log=True),
-        dns_backend=dict(type="str", default="SAMBA_INTERNAL", choices=logic.DNS_BACKENDS),
-        server_role=dict(type="str", default="dc", choices=logic.SERVER_ROLES),
-        function_level=dict(type="str", default="2008_R2", choices=logic.FUNCTION_LEVELS),
-        use_rfc2307=dict(type="bool", default=False),
-        state=dict(type="str", default="present", choices=["present"]),
-    )
+    argument_spec = {
+        "realm": {"type": "str", "required": True},
+        "domain": {"type": "str", "required": True},
+        "hostname": {"type": "str"},
+        "admin_password": {"type": "str", "no_log": True},
+        "dns_backend": {"type": "str", "default": "SAMBA_INTERNAL", "choices": logic.DNS_BACKENDS},
+        "server_role": {"type": "str", "default": "dc", "choices": logic.SERVER_ROLES},
+        "function_level": {"type": "str", "default": "2008_R2", "choices": logic.FUNCTION_LEVELS},
+        "use_rfc2307": {"type": "bool", "default": False},
+        "state": {"type": "str", "default": "present", "choices": ["present"]},
+    }
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     fail_without_bindings(module)
     provision_io = SambaProvisionIO(module)
 
-    try:
-        result = logic.run(module.params, module.check_mode, provision_io)
-    except logic.SambaProvisionError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_provision failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    result = run_or_fail(module, "samba_provision", (logic.SambaProvisionError,), lambda: logic.run(module.params, module.check_mode, provision_io))
 
     if provision_io.output is not None:
         result["output"] = provision_io.output

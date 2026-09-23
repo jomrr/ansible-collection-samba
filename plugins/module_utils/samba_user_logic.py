@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Pure, samba-free logic for the ``samba_user`` module.
@@ -205,16 +204,19 @@ def check_posix_preconditions(desired, io):
     for name in POSIX_INT_ATTRS:
         value = desired.get(name)
         if value is not None and value < 0:
-            raise SambaUserError("%s must be a non-negative integer" % name)
+            raise SambaUserError(f"{name} must be a non-negative integer")
     if not io.rfc2307_provisioned():
         raise SambaUserError(
             "domain is not provisioned with RFC2307/--use-rfc2307; "
-            "cannot set POSIX attributes (%s)" % ", ".join(posix_requested)
+            "cannot set POSIX attributes ({})".format(", ".join(posix_requested))
         )
 
 
 def _undo_create(io, username, exc):
-    """Remove the object a failed create left behind and report the cause.
+    """Remove the object a failed create left behind; return the error to raise.
+
+    The caller raises the returned error from the original cause. If removing
+    the object fails too, that failure is raised here instead.
 
     LDAP offers no transactions (ldb's LDAP backend implements
     transaction_start/commit/cancel as no-ops), so a create is made
@@ -228,17 +230,14 @@ def _undo_create(io, username, exc):
     """
     current = io.read_current(username)
     if current is None:
-        raise SambaUserError("creating user '%s' failed: %s" % (username, exc))
+        return SambaUserError(f"creating user '{username}' failed: {exc}")
     try:
         io.delete(current["_dn"])
     except Exception as undo_exc:
         raise SambaUserError(
-            "creating user '%s' failed: %s; removing the partially created object failed too: %s"
-            % (username, exc, undo_exc)
-        )
-    raise SambaUserError(
-        "creating user '%s' failed: %s; the partially created object was removed" % (username, exc)
-    )
+            f"creating user '{username}' failed: {exc}; removing the partially created object failed too: {undo_exc}"
+        ) from undo_exc
+    return SambaUserError(f"creating user '{username}' failed: {exc}; the partially created object was removed")
 
 
 def run(params, check_mode, io):
@@ -263,7 +262,7 @@ def run(params, check_mode, io):
     planned = plan(state, current, desired)
 
     if planned["action"] == "create" and not password:
-        raise SambaUserError("password is required to create user '%s'" % username)
+        raise SambaUserError(f"password is required to create user '{username}'")
 
     # update_password=always sets the password on an existing user on every run.
     # The password cannot be read back to diff, so the write itself is the
@@ -292,7 +291,7 @@ def run(params, check_mode, io):
     # caught by move().
     if state == "present" and path is not None and (current is None or move_needed) \
             and not io.parent_exists(path):
-        raise SambaUserError("path '%s' does not exist; create it first" % path)
+        raise SambaUserError(f"path '{path}' does not exist; create it first")
 
     action = planned["action"]
     if action == "none" and (set_pw_on_existing or move_needed):
@@ -348,10 +347,10 @@ def run(params, check_mode, io):
             # samba's newuser cleans up its own password step (it deletes the
             # account again when setting the password fails), so usually there
             # is nothing left to undo here; the guard covers whatever remains.
-            _undo_create(io, username, exc)
+            raise _undo_create(io, username, exc) from exc
         current = io.read_current(username)
         if current is None:
-            raise SambaUserError("user '%s' could not be read back after creation" % username)
+            raise SambaUserError(f"user '{username}' could not be read back after creation")
         # newuser placed the account under path; only the domain root, which
         # the relative container form cannot express, leaves a move to do.
         move_needed = io.needs_move(current["_dn"], path)
@@ -374,7 +373,7 @@ def run(params, check_mode, io):
             io.set_password(current["_dn"], password)
     except Exception as exc:
         if created:
-            _undo_create(io, username, exc)
+            raise _undo_create(io, username, exc) from exc
         raise
 
     result["user"] = public_state(io.read_current(username), username)

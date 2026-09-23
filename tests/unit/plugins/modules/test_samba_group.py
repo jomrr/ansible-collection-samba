@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_group orchestration.
@@ -9,13 +8,12 @@ must also not require samba."""
 from __future__ import annotations
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_group
 
 
 def member_dn(name):
-    return "CN=%s,CN=Users,DC=example,DC=com" % name
+    return f"CN={name},CN=Users,DC=example,DC=com"
 
 
 class FakeIO:
@@ -47,7 +45,7 @@ class FakeIO:
             "group_type": group_type_value,
             "gid_number": gid_number,
             "members": [],
-            "_dn": "CN=%s,%s" % (name, path or "CN=Users,DC=example,DC=com"),
+            "_dn": "CN={},{}".format(name, path or "CN=Users,DC=example,DC=com"),
         }
 
     def set_description(self, dn, description):
@@ -87,7 +85,7 @@ class FakeIO:
 
     def move(self, current_dn, path):
         self.calls.append(("move", current_dn, path))
-        return "CN=engineers,%s" % path
+        return f"CN=engineers,{path}"
 
 
 def make_params(**over):

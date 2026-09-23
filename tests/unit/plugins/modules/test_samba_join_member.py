@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_join_member I/O layer.
@@ -11,7 +10,6 @@ must also not require samba."""
 from __future__ import annotations
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_member_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_join_member
 

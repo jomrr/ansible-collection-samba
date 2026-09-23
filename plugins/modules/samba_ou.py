@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to manage organizational units in a Samba AD DC."""
@@ -128,15 +126,10 @@ ou:
       sample: All staff accounts
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb, samba_ou_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 
 class SambaOuIO:
@@ -156,7 +149,7 @@ class SambaOuIO:
         try:
             parent = samba_ldb.parse_dn(self.samdb, path)
         except ValueError:
-            raise logic.SambaOuError("path '%s' is not a valid distinguished name" % path)
+            raise logic.SambaOuError(f"path '{path}' is not a valid distinguished name")
         return samba_ldb.build_child_dn(self.samdb, "OU", name, parent)
 
     def parent_exists(self, path):
@@ -164,7 +157,7 @@ class SambaOuIO:
         try:
             parent = samba_ldb.parse_dn(self.samdb, path)
         except ValueError:
-            raise logic.SambaOuError("path '%s' is not a valid distinguished name" % path)
+            raise logic.SambaOuError(f"path '{path}' is not a valid distinguished name")
         return samba_ldb.dn_exists(self.samdb, parent)
 
     def read_current(self, name, path):
@@ -189,10 +182,10 @@ class SambaOuIO:
             self.samdb.create_ou(dn, description=description)
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
-                raise logic.SambaOuError("OU '%s' already exists (created concurrently?)" % dn)
+                raise logic.SambaOuError(f"OU '{dn}' already exists (created concurrently?)")
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
                 raise logic.SambaOuError(
-                    "parent path '%s' does not exist; create it first" % path
+                    f"parent path '{path}' does not exist; create it first"
                 )
             raise
 
@@ -213,7 +206,7 @@ class SambaOuIO:
             self.samdb.modify(message)
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                raise logic.SambaOuError("OU '%s' vanished before it could be modified" % dn)
+                raise logic.SambaOuError(f"OU '{dn}' vanished before it could be modified")
             if description is None and err.args[0] == ldb.ERR_NO_SUCH_ATTRIBUTE:
                 return
             raise
@@ -234,43 +227,34 @@ class SambaOuIO:
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
                 return False
             if err.args[0] == ldb.ERR_NOT_ALLOWED_ON_NON_LEAF:
-                raise logic.SambaOuError("OU '%s' is not empty; it contains child objects" % dn)
+                raise logic.SambaOuError(f"OU '{dn}' is not empty; it contains child objects")
             if err.args[0] == ldb.ERR_UNWILLING_TO_PERFORM:
                 raise logic.SambaOuError(
-                    "OU '%s' is protected from deletion by the directory: %s"
-                    % (dn, samba_ldb.error_text(err))
+                    f"OU '{dn}' is protected from deletion by the directory: {samba_ldb.error_text(err)}"
                 )
             if err.args[0] == ldb.ERR_INSUFFICIENT_ACCESS_RIGHTS:
                 raise logic.SambaOuError(
-                    "the bind user may not delete OU '%s' (protected from accidental deletion, "
-                    "or missing rights): %s" % (dn, samba_ldb.error_text(err))
+                    f"the bind user may not delete OU '{dn}' (protected from accidental deletion, "
+                    f"or missing rights): {samba_ldb.error_text(err)}"
                 )
             raise
 
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        name=dict(type="str", required=True),
-        path=dict(type="str", required=True),
-        description=dict(type="str"),
-        state=dict(type="str", default="present", choices=["present", "absent"]),
-    )
+    argument_spec = {
+        "name": {"type": "str", "required": True},
+        "path": {"type": "str", "required": True},
+        "description": {"type": "str"},
+        "state": {"type": "str", "default": "present", "choices": ["present", "absent"]},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
     ou_io = SambaOuIO(samdb)
 
-    try:
-        result = logic.run(module.params, module.check_mode, ou_io)
-    except logic.SambaOuError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_ou failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    result = run_or_fail(module, "samba_ou", (logic.SambaOuError,), lambda: logic.run(module.params, module.check_mode, ou_io))
 
     module.exit_json(**result)
 

@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to manage DNS records in a Samba AD DC."""
@@ -221,15 +219,10 @@ record:
       sample: 389
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io, samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 
 class SambaDnsRecordIO:
@@ -487,18 +480,18 @@ class SambaDnsRecordIO:
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        zone=dict(type="str", required=True),
-        name=dict(type="str", required=True),
-        type=dict(type="str", required=True, choices=logic.TYPE_CHOICES),
-        value=dict(type="str", required=True),
-        preference=dict(type="int"),
-        priority=dict(type="int"),
-        weight=dict(type="int"),
-        port=dict(type="int"),
-        ttl=dict(type="int", default=900),
-        state=dict(type="str", default="present", choices=["present", "absent"]),
-    )
+    argument_spec = {
+        "zone": {"type": "str", "required": True},
+        "name": {"type": "str", "required": True},
+        "type": {"type": "str", "required": True, "choices": logic.TYPE_CHOICES},
+        "value": {"type": "str", "required": True},
+        "preference": {"type": "int"},
+        "priority": {"type": "int"},
+        "weight": {"type": "int"},
+        "port": {"type": "int"},
+        "ttl": {"type": "int", "default": 900},
+        "state": {"type": "str", "default": "present", "choices": ["present", "absent"]},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(
         argument_spec=argument_spec,
@@ -512,15 +505,7 @@ def main():
     samdb = connect_samdb(module)
     record_io = SambaDnsRecordIO(samdb)
 
-    try:
-        result = logic.run(module.params, module.check_mode, record_io)
-    except logic.SambaDnsRecordError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_dns_record failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    result = run_or_fail(module, "samba_dns_record", (logic.SambaDnsRecordError,), lambda: logic.run(module.params, module.check_mode, record_io))
 
     module.exit_json(**result)
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """MIT Kerberos keytab reader (principal names only) for samba_join_sssd.
@@ -37,7 +36,7 @@ def read_principals(path):
 def parse_principals(data):
     """Return ``[(realm, [component, ...]), ...]`` for every live entry in ``data``."""
     if data[:2] != _VERSION:
-        raise KeytabError("not a version 2 keytab (header %r)" % (data[:2],))
+        raise KeytabError(f"not a version 2 keytab (header {data[:2]!r})")
     principals = []
     pos = 2
     while pos < len(data):

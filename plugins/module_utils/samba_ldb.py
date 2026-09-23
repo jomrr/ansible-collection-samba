@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Shared LDB access for the samba object modules.
@@ -65,7 +64,7 @@ def build_child_dn(samdb, rdn_attr, name, parent_dn):
     extra DN components.
     """
     ldb = load_ldb()
-    dn = ldb.Dn(samdb, "%s=placeholder" % rdn_attr)
+    dn = ldb.Dn(samdb, f"{rdn_attr}=placeholder")
     dn.set_component(0, rdn_attr, name)
     dn.add_base(parent_dn)
     return dn
@@ -118,7 +117,7 @@ def rfc2307_provisioned(samdb):
     user and group I/O layers, it is a single base-scoped existence search and is
     only ever called when a POSIX attribute was actually requested.
     """
-    dn = parse_dn(samdb, "CN=ypServ30,CN=RpcServices,CN=System,%s" % samdb.domain_dn())
+    dn = parse_dn(samdb, f"CN=ypServ30,CN=RpcServices,CN=System,{samdb.domain_dn()}")
     return dn_exists(samdb, dn)
 
 
@@ -151,7 +150,7 @@ class SambaObjectIO:
             self.samdb.modify(message)
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                raise self.error_cls("%s '%s' vanished before it could be modified" % (self.noun, dn))
+                raise self.error_cls(f"{self.noun} '{dn}' vanished before it could be modified")
             raise
 
     def delete(self, dn):
@@ -183,7 +182,7 @@ class SambaObjectIO:
         try:
             return parse_dn(self.samdb, path)
         except ValueError:
-            raise self.error_cls("path '%s' is not a valid distinguished name" % path)
+            raise self.error_cls(f"path '{path}' is not a valid distinguished name")
 
     def container_below_domain(self, path):
         """Return ``path`` relative to the domain DN, the form ``newuser``/``newgroup`` take.
@@ -198,7 +197,7 @@ class SambaObjectIO:
         container = self._desired_parent(path)
         base = self.samdb.get_default_basedn()
         if not container.is_child_of(base):
-            raise self.error_cls("path '%s' is not below the domain '%s'" % (path, base))
+            raise self.error_cls(f"path '{path}' is not below the domain '{base}'")
         container.remove_base_components(len(base))
         return str(container) or None
 
@@ -218,7 +217,7 @@ class SambaObjectIO:
             self.samdb.rename(parse_dn(self.samdb, current_dn), target)
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_NO_SUCH_OBJECT:
-                raise self.error_cls("%s vanished before it could be moved" % self.noun)
+                raise self.error_cls(f"{self.noun} vanished before it could be moved")
             if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
                 raise self.error_cls("an object already exists at the target location")
             raise

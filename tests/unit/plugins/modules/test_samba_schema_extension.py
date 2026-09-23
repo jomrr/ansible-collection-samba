@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_schema_extension I/O layer.
@@ -13,7 +12,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_schema_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_schema_extension
@@ -80,7 +78,7 @@ class FakeLdb:
         return (list(values), flag, name)
 
     def binary_encode(self, value):
-        return "ESC(%s)" % value
+        return f"ESC({value})"
 
 
 class FakeSamDB:
@@ -140,11 +138,11 @@ def make_io(**kwargs):
 def test_find_schema_converts_binary_guids_and_missing_attributes():
     message = FakeMessage(
         {"lDAPDisplayName": ["sshPublicKey"], "schemaIDGUID": [uuid.UUID(GUID).bytes_le]},
-        dn="CN=sshPublicKey,%s" % SCHEMA,
+        dn=f"CN=sshPublicKey,{SCHEMA}",
     )
     io = make_io(results={"(lDAPDisplayName=ESC(sshPublicKey))": [message]})
     record = io.find_schema("sshPublicKey", ["lDAPDisplayName", "schemaIDGUID", "searchFlags"])
-    assert record["_dn"] == "CN=sshPublicKey,%s" % SCHEMA
+    assert record["_dn"] == f"CN=sshPublicKey,{SCHEMA}"
     assert record["schemaIDGUID"] == [GUID]
     assert record["searchFlags"] == []
     assert io.find_schema("ghost", ["searchFlags"]) is None
@@ -153,13 +151,13 @@ def test_find_schema_converts_binary_guids_and_missing_attributes():
 def test_apply_adds_and_modifies_in_one_transaction_with_binary_guids():
     io = make_io()
     io.apply([
-        {"action": "add", "dn": "CN=x,%s" % SCHEMA, "label": "add x",
+        {"action": "add", "dn": f"CN=x,{SCHEMA}", "label": "add x",
          "values": {"objectClass": ["attributeSchema"], "schemaIDGUID": [GUID], "searchFlags": ["8"]}},
-        {"action": "modify", "dn": "CN=User,%s" % SCHEMA, "label": "modify user",
+        {"action": "modify", "dn": f"CN=User,{SCHEMA}", "label": "modify user",
          "replace": {"searchFlags": ["8"]}, "add": {"auxiliaryClass": ["ldapPublicKey"]}},
     ])
     added = io.samdb.added[0]
-    assert str(added.dn) == "CN=x,%s" % SCHEMA
+    assert str(added.dn) == f"CN=x,{SCHEMA}"
     assert added.elements["schemaIDGUID"] == ([uuid.UUID(GUID).bytes_le], FakeLdb.FLAG_MOD_ADD, "schemaIDGUID")
     assert added.elements["searchFlags"] == (["8"], FakeLdb.FLAG_MOD_ADD, "searchFlags")
     modified = io.samdb.modified[0]
@@ -171,7 +169,7 @@ def test_apply_adds_and_modifies_in_one_transaction_with_binary_guids():
 def test_apply_cancels_the_transaction_and_names_the_operation_on_failure():
     io = make_io(fail_modify=FakeLdbError(53, "objectclass: schema update not allowed"))
     with pytest.raises(logic.SambaSchemaError) as raised:
-        io.apply([{"action": "modify", "dn": "CN=User,%s" % SCHEMA, "label": "modify classSchema user (auxiliaryClass)",
+        io.apply([{"action": "modify", "dn": f"CN=User,{SCHEMA}", "label": "modify classSchema user (auxiliaryClass)",
                    "replace": {}, "add": {"auxiliaryClass": ["ldapPublicKey"]}}])
     assert "modify classSchema user (auxiliaryClass) failed" in str(raised.value)
     assert "schema update not allowed" in str(raised.value)

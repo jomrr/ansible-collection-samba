@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the schema extension planner and the catalog (no samba required).
@@ -11,7 +10,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_schema_catalog as catalog
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_schema_logic as logic
 
@@ -57,8 +55,8 @@ class FakeIO:
 def base_classes():
     """The two structural classes every extension links into."""
     return {
-        "user": {"_dn": "CN=User,%s" % SCHEMA, "auxiliaryClass": ["posixAccount"], "mayContain": []},
-        "computer": {"_dn": "CN=Computer,%s" % SCHEMA, "auxiliaryClass": [], "mayContain": ["msDS-Foo"]},
+        "user": {"_dn": f"CN=User,{SCHEMA}", "auxiliaryClass": ["posixAccount"], "mayContain": []},
+        "computer": {"_dn": f"CN=Computer,{SCHEMA}", "auxiliaryClass": [], "mayContain": ["msDS-Foo"]},
     }
 
 
@@ -83,7 +81,7 @@ def test_catalog_definitions_are_consistent():
 
 
 def test_laps_attributes_match_the_microsoft_reference():
-    by_name = dict((attribute["lDAPDisplayName"], attribute) for attribute in catalog.EXTENSIONS["laps"]["attributes"])
+    by_name = {attribute["lDAPDisplayName"]: attribute for attribute in catalog.EXTENSIONS["laps"]["attributes"]}
     assert by_name["msLAPS-Password"]["attributeID"] == "1.2.840.113556.1.6.44.1.2"
     assert by_name["msLAPS-Password"]["searchFlags"] == "904"
     assert by_name["msLAPS-PasswordExpirationTime"]["searchFlags"] == "0"
@@ -104,12 +102,12 @@ def test_fresh_schema_gets_everything_in_dependency_order():
         "modify classSchema user (auxiliaryClass)",
     ]
     attribute_add = phases[0][1][0]
-    assert attribute_add["dn"] == "CN=sshPublicKey,%s" % SCHEMA
+    assert attribute_add["dn"] == f"CN=sshPublicKey,{SCHEMA}"
     assert attribute_add["values"]["objectClass"] == ["attributeSchema"]
     assert attribute_add["values"]["schemaIDGUID"] == ["67c03072-1721-4fcd-bf6a-42341060d6fa"]
     class_add = phases[1][1][0]
     # An auxiliary class points its default category at itself.
-    assert class_add["values"]["defaultObjectCategory"] == ["CN=ldapPublicKey,%s" % SCHEMA]
+    assert class_add["values"]["defaultObjectCategory"] == [f"CN=ldapPublicKey,{SCHEMA}"]
     link = phases[2][1][0]
     assert link["add"] == {"auxiliaryClass": ["ldapPublicKey"]}
     assert link["replace"] == {}
@@ -123,8 +121,8 @@ def test_laps_plans_rights_and_the_computer_link():
     assert names[-1] == "modify classSchema computer (mayContain)"
     link = phases[2][1][0]
     assert len(link["add"]["mayContain"]) == 7
-    right = [operation for operation in phases[0][1] if "controlAccessRight" in operation["label"]][0]
-    assert right["dn"] == "CN=ms-LAPS-Encrypted-Password-Attributes,CN=Extended-Rights,%s" % CONFIG
+    right = next(operation for operation in phases[0][1] if "controlAccessRight" in operation["label"])
+    assert right["dn"] == f"CN=ms-LAPS-Encrypted-Password-Attributes,CN=Extended-Rights,{CONFIG}"
     assert right["values"]["rightsGuid"] == [catalog.LAPS_RIGHT_GUID]
 
 
@@ -132,19 +130,19 @@ def complete_sshpublickey():
     schema = base_classes()
     schema["user"]["auxiliaryClass"].append("LDAPPUBLICKEY")
     schema["sshpublickey"] = {
-        "_dn": "CN=sshPublicKey,%s" % SCHEMA,
+        "_dn": f"CN=sshPublicKey,{SCHEMA}",
         "cn": ["sshPublicKey"], "lDAPDisplayName": ["sshPublicKey"],
         "attributeID": ["1.3.6.1.4.1.24552.500.1.1.1.13"], "attributeSyntax": ["2.5.5.10"], "oMSyntax": ["4"],
         "isSingleValued": ["FALSE"], "searchFlags": ["8"], "description": ["MANDATORY: OpenSSH Public key"],
         "schemaIDGUID": ["67c03072-1721-4fcd-bf6a-42341060d6fa"],
     }
     schema["ldappublickey"] = {
-        "_dn": "CN=ldapPublicKey,%s" % SCHEMA,
+        "_dn": f"CN=ldapPublicKey,{SCHEMA}",
         "cn": ["ldapPublicKey"], "lDAPDisplayName": ["ldapPublicKey"],
         "governsID": ["1.3.6.1.4.1.24552.500.1.1.2.0"], "subClassOf": ["top"], "objectClassCategory": ["3"],
         "mayContain": ["sshPublicKey"], "schemaIDGUID": ["43c5c9fb-eb8d-45a6-933a-06c209c4a4a8"],
         "description": ["MANDATORY: OpenSSH LPK objectclass"],
-        "defaultObjectCategory": ["CN=ldapPublicKey,%s" % SCHEMA],
+        "defaultObjectCategory": [f"CN=ldapPublicKey,{SCHEMA}"],
     }
     return schema
 

@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to query users from a Samba AD DC via the python bindings."""
@@ -140,15 +138,10 @@ users:
       sample: true
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb, samba_user_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 
 def query(samdb, username):
@@ -162,7 +155,7 @@ def query(samdb, username):
     if username is None:
         expression = base_filter % ""
     else:
-        expression = base_filter % ("(sAMAccountName=%s)" % ldb.binary_encode(username))
+        expression = base_filter % (f"(sAMAccountName={ldb.binary_encode(username)})")
     res = samdb.search(
         base=samdb.domain_dn(),
         scope=ldb.SCOPE_SUBTREE,
@@ -177,21 +170,15 @@ def query(samdb, username):
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        username=dict(type="str", aliases=["name", "samaccountname"]),
-    )
+    argument_spec = {
+        "username": {"type": "str", "aliases": ["name", "samaccountname"]},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
 
-    try:
-        users = query(samdb, module.params["username"])
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_user_info failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    users = run_or_fail(module, "samba_user_info", (), lambda: query(samdb, module.params["username"]))
 
     module.exit_json(changed=False, users=users)
 

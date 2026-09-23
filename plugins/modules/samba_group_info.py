@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to query groups from a Samba AD DC via the python bindings."""
@@ -115,15 +113,10 @@ groups:
         - CN=Jane Doe,CN=Users,DC=example,DC=com
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_io, samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 
 def query(samdb, name):
@@ -136,7 +129,7 @@ def query(samdb, name):
     if name is None:
         expression = "(objectClass=group)"
     else:
-        expression = "(&(objectClass=group)(sAMAccountName=%s))" % ldb.binary_encode(name)
+        expression = f"(&(objectClass=group)(sAMAccountName={ldb.binary_encode(name)}))"
     res = samdb.search(
         base=samdb.domain_dn(),
         scope=ldb.SCOPE_SUBTREE,
@@ -151,21 +144,15 @@ def query(samdb, name):
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        name=dict(type="str", aliases=["samaccountname"]),
-    )
+    argument_spec = {
+        "name": {"type": "str", "aliases": ["samaccountname"]},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
 
-    try:
-        groups = query(samdb, module.params["name"])
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_group_info failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    groups = run_or_fail(module, "samba_group_info", (), lambda: query(samdb, module.params["name"]))
 
     module.exit_json(changed=False, groups=groups)
 

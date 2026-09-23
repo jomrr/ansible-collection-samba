@@ -34,7 +34,7 @@ setup).
 | `samba_ou_info` | Query organizational units | n/a (read) | n/a |
 | `samba_dns_record` | Manage DNS records (A, AAAA, CNAME, PTR, NS, MX, SRV, TXT) | yes | yes |
 | `samba_dns_record_info` | Query DNS records | n/a (read) | n/a |
-| `samba_dns_zone` | Create and remove AD-integrated DNS zones (forward/reverse) | yes | yes |
+| `samba_dns_zone` | Create and remove AD-integrated DNS zones (forward/reverse), set record aging | yes | yes |
 | `samba_dns_zone_info` | Query DNS zones | n/a (read) | n/a |
 | `samba_password_policy` | Manage the domain password policy (length, history, ages, lockout, complexity) | yes | yes |
 | `samba_password_settings` | Manage fine-grained password settings objects (PSOs) and their subjects | yes | yes |
@@ -344,6 +344,19 @@ Create a forward DNS zone and a record in it:
         name: www
         type: A
         value: 192.0.2.10
+        state: present
+```
+
+Enable record aging on a zone, as `samba-tool dns zoneoptions` does. The DC
+removes aged records only with `dns zone scavenging = yes` in its `smb.conf`:
+
+```yaml
+    - name: Enable record aging with one-week intervals
+      jomrr.samba.samba_dns_zone:
+        name: example.com
+        aging: true
+        norefresh_interval: 168
+        refresh_interval: 168
         state: present
 ```
 

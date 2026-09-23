@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to query organizational units from a Samba AD DC."""
@@ -106,15 +104,10 @@ ous:
       sample: All staff accounts
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb, samba_ou_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 
 def query(samdb, name, path):
@@ -134,13 +127,13 @@ def query(samdb, name, path):
         try:
             base = samba_ldb.parse_dn(samdb, path)
         except ValueError:
-            raise logic.SambaOuError("path '%s' is not a valid distinguished name" % path)
+            raise logic.SambaOuError(f"path '{path}' is not a valid distinguished name")
     if name is None:
         scope = ldb.SCOPE_SUBTREE
         expression = "(objectClass=organizationalUnit)"
     else:
         scope = ldb.SCOPE_ONELEVEL
-        expression = "(&(objectClass=organizationalUnit)(ou=%s))" % ldb.binary_encode(name)
+        expression = f"(&(objectClass=organizationalUnit)(ou={ldb.binary_encode(name)}))"
     try:
         res = samdb.search(base=base, scope=scope, expression=expression, attrs=samba_ou_io.OU_ATTRS)
     except ldb.LdbError as err:
@@ -155,24 +148,16 @@ def query(samdb, name, path):
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        name=dict(type="str"),
-        path=dict(type="str"),
-    )
+    argument_spec = {
+        "name": {"type": "str"},
+        "path": {"type": "str"},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
 
-    try:
-        ous = query(samdb, module.params["name"], module.params["path"])
-    except logic.SambaOuError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_ou_info failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    ous = run_or_fail(module, "samba_ou_info", (logic.SambaOuError,), lambda: query(samdb, module.params["name"], module.params["path"]))
 
     module.exit_json(changed=False, ous=ous)
 

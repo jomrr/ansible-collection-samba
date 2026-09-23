@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_dns_record orchestration and pure logic.
@@ -9,7 +8,6 @@ must also not require samba."""
 from __future__ import annotations
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_dns_record
 
@@ -80,20 +78,20 @@ def call_names(fake):
 
 # Per-type parameter sets and a matching existing spec for each.
 TYPE_CASES = {
-    "A": (dict(type="A", value="192.0.2.10"), {"type": "A", "value": "192.0.2.10", "ttl": 900}),
-    "AAAA": (dict(type="AAAA", value="2001:db8::10"),
+    "A": ({"type": "A", "value": "192.0.2.10"}, {"type": "A", "value": "192.0.2.10", "ttl": 900}),
+    "AAAA": ({"type": "AAAA", "value": "2001:db8::10"},
              {"type": "AAAA", "value": "2001:0db8:0000:0000:0000:0000:0000:0010", "ttl": 900}),
-    "CNAME": (dict(type="CNAME", value="www.example.com"),
+    "CNAME": ({"type": "CNAME", "value": "www.example.com"},
               {"type": "CNAME", "value": "www.example.com.", "ttl": 900}),
-    "PTR": (dict(type="PTR", value="host.example.com"),
+    "PTR": ({"type": "PTR", "value": "host.example.com"},
             {"type": "PTR", "value": "host.example.com.", "ttl": 900}),
-    "NS": (dict(type="NS", value="ns1.example.com"),
+    "NS": ({"type": "NS", "value": "ns1.example.com"},
            {"type": "NS", "value": "ns1.example.com.", "ttl": 900}),
-    "MX": (dict(type="MX", value="mail.example.com", preference=10),
+    "MX": ({"type": "MX", "value": "mail.example.com", "preference": 10},
            {"type": "MX", "value": "mail.example.com.", "preference": 10, "ttl": 900}),
-    "SRV": (dict(type="SRV", value="dc1.example.com", priority=0, weight=100, port=389),
+    "SRV": ({"type": "SRV", "value": "dc1.example.com", "priority": 0, "weight": 100, "port": 389},
             {"type": "SRV", "value": "dc1.example.com.", "priority": 0, "weight": 100, "port": 389, "ttl": 900}),
-    "TXT": (dict(type="TXT", value="v=spf1 -all"),
+    "TXT": ({"type": "TXT", "value": "v=spf1 -all"},
             {"type": "TXT", "value": "v=spf1 -all", "ttl": 900}),
 }
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for samba_conn.
@@ -13,9 +12,9 @@ from __future__ import annotations
 
 import importlib
 import os
+from typing import ClassVar
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_conn
 
 
@@ -48,7 +47,7 @@ class FakeLoadParm:
 
 
 class FakeCredentials:
-    instances = []
+    instances: ClassVar[list[FakeCredentials]] = []
     kinit_error = None
 
     def __init__(self):
@@ -83,8 +82,12 @@ class FakeLdbError(Exception):
     """Stand-in for ldb.LdbError; args are (code, message)."""
 
 
+class FakeLdbModule:
+    LdbError = FakeLdbError
+
+
 class FakeSamDB:
-    instances = []
+    instances: ClassVar[list[FakeSamDB]] = []
     fail_with = None
 
     def __init__(self, url=None, credentials=None, lp=None):
@@ -117,6 +120,7 @@ class FakeModule:
 
 
 _FAKE_SAMBA = {
+    "ldb": FakeLdbModule,
     "samba.param": FakeParamModule,
     "samba.credentials": FakeCredentialsModule,
     "samba.samdb": FakeSamDBModule,

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """The schema extensions samba_schema_extension knows.
@@ -50,7 +49,7 @@ def _attribute(cn, name, oid, syntax, om_syntax, single, flags, **extra):
 def _laps(suffix, index, syntax, om_syntax, single, flags, **extra):
     """A Windows LAPS attribute (OID 1.2.840.113556.1.6.44.1.<index>)."""
     return _attribute(
-        "ms-LAPS-%s" % suffix, "msLAPS-%s" % suffix, "1.2.840.113556.1.6.44.1.%d" % index,
+        f"ms-LAPS-{suffix}", f"msLAPS-{suffix}", f"1.2.840.113556.1.6.44.1.{index}",
         syntax, om_syntax, single, flags, systemOnly="FALSE", isMemberOfPartialAttributeSet="FALSE",
         **extra
     )

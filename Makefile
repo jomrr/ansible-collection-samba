@@ -11,10 +11,13 @@ AT := ANSIBLE_TEST_PREFER_PODMAN=1 ansible-test
 # The directory that contains ansible_collections/ (three levels up from this
 # collection dir), so antsibull-docs' `--use-current` can resolve jomrr.samba.
 COLLECTIONS_ROOT := $(CURDIR)/../../..
+# Pinned via uvx; mypy gets ansible-core to resolve ansible.module_utils.
+RUFF := uvx ruff@0.16.8
+MYPY := uvx --with 'ansible-core==2.20.*' mypy@2.3.1
 
 .DEFAULT_GOAL := help
 
-.PHONY: help lint sanity units test molecule molecule-provision molecule-join-dc molecule-join-member molecule-join-sssd build promote release release-dry galaxy docs docs-clean clean
+.PHONY: help lint sanity units molecule molecule-provision molecule-join-dc molecule-join-member molecule-join-sssd build promote release release-dry galaxy docs docs-clean clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -29,7 +32,16 @@ sanity: ## Run ansible-test sanity (Podman, py3.12)
 units: ## Run ansible-test units (Podman, py3.12)
 	$(AT) units --docker --python $(PYTHON_VERSION)
 
-test: lint sanity units ## Run the fast gates together (lint + sanity + units)
+.PHONY: ruff
+ruff: ## Run ruff on the plugins and unit tests
+	$(RUFF) check plugins tests/unit
+
+.PHONY: mypy
+mypy: ## Run mypy on the collection plugins
+	$(MYPY) -p ansible_collections.jomrr.samba.plugins
+
+.PHONY: test
+test: lint ruff mypy sanity units ## Run the fast gates together (lint + ruff + mypy + sanity + units)
 
 molecule: ## Run the full Molecule integration suite (four distros; slow)
 	molecule test

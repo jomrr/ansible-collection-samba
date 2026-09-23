@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to join a host as a Samba AD member server via the bindings."""
@@ -185,17 +183,16 @@ domain:
 """
 
 import importlib
-import traceback
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
-
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_member_logic as logic
 from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import (
     KERBEROS_CHOICES,
     apply_kerberos_policy,
     fail_without_bindings,
+    run_or_fail,
 )
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_member_logic as logic
 
 
 class SambaJoinMemberIO:
@@ -239,8 +236,7 @@ class SambaJoinMemberIO:
             if err.args[0] == ntstatus.NT_STATUS_CANT_ACCESS_DOMAIN_INFO:
                 return None
             raise logic.SambaJoinMemberError(
-                "could not read the local machine account (NTSTATUS 0x%08X): %s"
-                % (err.args[0], to_native(err.args[1]))
+                f"could not read the local machine account (NTSTATUS 0x{err.args[0]:08X}): {to_native(err.args[1])}"
             )
         return {
             "workgroup": load_parm.get("workgroup"),
@@ -288,7 +284,7 @@ class SambaJoinMemberIO:
         try:
             sid, domain_name = net.join_member(netbios_name, machinepass=params["machinepass"])
         except Exception as exc:
-            raise logic.SambaJoinMemberError("joining the domain failed: %s" % to_native(exc))
+            raise logic.SambaJoinMemberError(f"joining the domain failed: {to_native(exc)}") from exc
 
         return {
             "workgroup": to_native(domain_name),
@@ -299,30 +295,22 @@ class SambaJoinMemberIO:
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        realm=dict(type="str", required=True),
-        server=dict(type="str", required=True),
-        bind_username=dict(type="str", required=True),
-        bind_password=dict(type="str", no_log=True),
-        machinepass=dict(type="str", no_log=True),
-        use_kerberos=dict(type="str", default="required", choices=KERBEROS_CHOICES),
-        force=dict(type="bool", default=False),
-        state=dict(type="str", default="present", choices=["present"]),
-    )
+    argument_spec = {
+        "realm": {"type": "str", "required": True},
+        "server": {"type": "str", "required": True},
+        "bind_username": {"type": "str", "required": True},
+        "bind_password": {"type": "str", "no_log": True},
+        "machinepass": {"type": "str", "no_log": True},
+        "use_kerberos": {"type": "str", "default": "required", "choices": KERBEROS_CHOICES},
+        "force": {"type": "bool", "default": False},
+        "state": {"type": "str", "default": "present", "choices": ["present"]},
+    }
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     fail_without_bindings(module)
     join_io = SambaJoinMemberIO(module)
 
-    try:
-        result = logic.run(module.params, module.check_mode, join_io)
-    except logic.SambaJoinMemberError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_join_member failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    result = run_or_fail(module, "samba_join_member", (logic.SambaJoinMemberError,), lambda: logic.run(module.params, module.check_mode, join_io))
 
     module.exit_json(**result)
 

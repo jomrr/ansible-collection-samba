@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """LDB I/O shared by samba_password_policy and samba_password_settings.
@@ -49,7 +48,7 @@ class PasswordPolicyIO(samba_ldb.SambaObjectIO):
     def pso_dn(self, name):
         """The DN of PSO ``name`` below the Password Settings Container, name escaped."""
         container = samba_ldb.parse_dn(
-            self.samdb, "%s,%s" % (logic.PSO_CONTAINER_RDN, self.samdb.domain_dn())
+            self.samdb, f"{logic.PSO_CONTAINER_RDN},{self.samdb.domain_dn()}"
         )
         return str(samba_ldb.build_child_dn(self.samdb, "CN", name, container))
 
@@ -67,7 +66,7 @@ class PasswordPolicyIO(samba_ldb.SambaObjectIO):
             self.samdb.add(message)
         except ldb.LdbError as err:
             if err.args[0] == ldb.ERR_ENTRY_ALREADY_EXISTS:
-                raise logic.SambaPasswordPolicyError("'%s' already exists (created concurrently?)" % dn)
+                raise logic.SambaPasswordPolicyError(f"'{dn}' already exists (created concurrently?)")
             raise
 
     def modify(self, dn, changes):
@@ -91,9 +90,9 @@ class PasswordPolicyIO(samba_ldb.SambaObjectIO):
         for name in dict.fromkeys(names):
             escaped = ldb.binary_encode(name)
             expression = (
-                "(&(|(sAMAccountName=%s)(distinguishedName=%s))"
+                f"(&(|(sAMAccountName={escaped})(distinguishedName={escaped}))"
                 "(|(&(objectClass=user)(!(objectClass=computer)))"
-                "(&(objectClass=group)(groupType=-2147483646))))" % (escaped, escaped)
+                "(&(objectClass=group)(groupType=-2147483646))))"
             )
             res = self.samdb.search(
                 base=self.samdb.domain_dn(),
@@ -107,6 +106,6 @@ class PasswordPolicyIO(samba_ldb.SambaObjectIO):
             resolved.add(str(res[0].dn))
         if missing:
             raise logic.SambaPasswordPolicyError(
-                "not a user or global security group: %s" % ", ".join(missing)
+                "not a user or global security group: {}".format(", ".join(missing))
             )
         return sorted(resolved)

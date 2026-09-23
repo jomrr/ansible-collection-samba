@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_user module orchestration.
@@ -10,7 +9,6 @@ samba - that is the litmus test for the layer separation."""
 from __future__ import annotations
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_user_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_user
 
@@ -42,7 +40,7 @@ class FakeIO:
             "email": None,
             "description": None,
             "enabled": True,
-            "_dn": "CN=%s,%s" % (username, path or "CN=Users,DC=example,DC=com"),
+            "_dn": "CN={},{}".format(username, path or "CN=Users,DC=example,DC=com"),
             "_uac": 512,
         }
         self.current.update(attrs)
@@ -77,7 +75,7 @@ class FakeIO:
 
     def move(self, current_dn, path):
         self.calls.append(("move", current_dn, path))
-        return "CN=jdoe,%s" % path
+        return f"CN=jdoe,{path}"
 
 
 def make_params(**over):
@@ -362,7 +360,7 @@ def test_posix_attrs_create_writes():
     )
     assert result["changed"] is True
     # The POSIX attributes go onto the add itself (newuser takes them).
-    created = [call[4] for call in fake.calls if call[0] == "create_user"][0]
+    created = next(call[4] for call in fake.calls if call[0] == "create_user")
     assert created["uid_number"] == 10001
     assert created["login_shell"] == "/bin/bash"
     assert "apply_attrs" not in call_names(fake)
@@ -496,7 +494,7 @@ def test_check_mode_move_to_missing_parent_fails_like_a_real_run():
 def test_check_mode_invalid_path_fails_like_a_real_run():
     class _InvalidPathIO(FakeIO):
         def parent_exists(self, path):
-            raise logic.SambaUserError("path '%s' is not a valid distinguished name" % path)
+            raise logic.SambaUserError(f"path '{path}' is not a valid distinguished name")
 
     fake = _InvalidPathIO(current=None)
     with pytest.raises(logic.SambaUserError):

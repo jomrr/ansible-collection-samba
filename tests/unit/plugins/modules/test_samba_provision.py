@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_provision I/O layer.
@@ -10,8 +9,9 @@ separation)."""
 
 from __future__ import annotations
 
-import pytest
+from typing import ClassVar
 
+import pytest
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_local
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_provision_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_provision
@@ -42,7 +42,7 @@ class FakeAuth:
 
 class FakeFunctionalLevel:
     # Mirrors samba.functional_level.string_to_level (verified mapping).
-    _LEVELS = {"2000": 0, "2003": 2, "2008": 3, "2008_R2": 4, "2012": 5, "2012_R2": 6, "2016": 7}
+    _LEVELS: ClassVar[dict[str, int]] = {"2000": 0, "2003": 2, "2008": 3, "2008_R2": 4, "2012": 5, "2012_R2": 6, "2016": 7}
 
     @classmethod
     def string_to_level(cls, value):

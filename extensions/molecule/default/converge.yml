@@ -488,6 +488,20 @@
         name: zghost.example.com
         state: absent
 
+    - name: Converge | Create a DNS zone with record aging and both intervals
+      jomrr.samba.samba_dns_zone:
+        name: zaging.example.com
+        aging: true
+        norefresh_interval: 72
+        refresh_interval: 96
+        state: present
+
+    - name: Converge | Turn aging off on a seeded zone and leave its intervals alone
+      jomrr.samba.samba_dns_zone:
+        name: zseedaging.example.com
+        aging: false
+        state: present
+
     # --- password policy and fine-grained password settings ---
     # Last on purpose: the domain policy applies to every password set after
     # it. The values stay compatible with the fixture password used above.

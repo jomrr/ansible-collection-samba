@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the read-only samba_group_info module.
@@ -9,10 +8,8 @@ bindings. Importing the module must also not require samba."""
 from __future__ import annotations
 
 import pytest
-
 from ansible.module_utils import basic
 from ansible.module_utils.testing import patch_module_args
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_group_logic as logic
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_group_info
@@ -39,7 +36,7 @@ class FakeLdb:
 
     def binary_encode(self, value):
         self.encoded.append(value)
-        return "ESC(%s)" % value
+        return f"ESC({value})"
 
 
 class FakeSamDB:
@@ -61,7 +58,7 @@ def group_msg(name, group_type_value, **attrs):
     data = {"sAMAccountName": [name], "groupType": [str(group_type_value)]}
     for key, value in attrs.items():
         data[key] = value if isinstance(value, list) else [value]
-    return FakeMessage(data, "CN=%s,CN=Users,DC=example,DC=com" % name)
+    return FakeMessage(data, f"CN={name},CN=Users,DC=example,DC=com")
 
 
 def test_module_imports_without_samba():
@@ -160,9 +157,9 @@ def _run_main(monkeypatch, check_mode):
         lambda module: FakeSamDB(result=[group_msg("engineers", logic.group_type("global", "security"))]),
     )
     monkeypatch.setattr(basic.AnsibleModule, "exit_json", _exit_json)
-    with patch_module_args({"server": "dc.example.com", "bind_username": "Administrator", "bind_password": "secret", "_ansible_check_mode": check_mode}):
-        with pytest.raises(AnsibleExitJson) as raised:
-            samba_group_info.main()
+    args = {"server": "dc.example.com", "bind_username": "Administrator", "bind_password": "secret", "_ansible_check_mode": check_mode}
+    with patch_module_args(args), pytest.raises(AnsibleExitJson) as raised:
+        samba_group_info.main()
     return raised.value.args[0]
 
 

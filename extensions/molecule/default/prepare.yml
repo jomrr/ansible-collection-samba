@@ -453,3 +453,24 @@
           jomrr.samba.samba_dns_zone:
             name: zdelete.example.com
             state: present
+
+        - name: Prepare | seed | DNS zone converge will turn aging off on
+          jomrr.samba.samba_dns_zone:
+            name: zseedaging.example.com
+            state: present
+
+        - name: Prepare | seed | enable aging on that zone the way samba-tool does
+          ansible.builtin.command:
+            argv:
+              - samba-tool
+              - dns
+              - zoneoptions
+              - "{{ samba_fqdn }}"
+              - zseedaging.example.com
+              - "--aging=1"
+              - "--norefreshinterval=24"
+              - "--refreshinterval=48"
+              - "--username=Administrator"
+          environment:
+            PASSWD: "{{ samba_admin_password }}"
+          changed_when: true

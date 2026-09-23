@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_dns_record LDB I/O layer (SambaDnsRecordIO) and the
@@ -13,10 +12,8 @@ every real change carries."""
 from __future__ import annotations
 
 import pytest
-
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io, samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.modules import samba_dns_record
 
 #: The real helper, captured before the autouse fixture stubs it for the IO tests.
@@ -34,7 +31,7 @@ class FakeDn:
         self.text = text
 
     def set_component(self, num, name, value):
-        self.text = "%s=%s" % (name, value)
+        self.text = f"{name}={value}"
 
     def add_base(self, parent):
         self.text = self.text + "," + parent.text
@@ -225,7 +222,7 @@ def make_io(samdb):
 
 def written_records(message):
     """Return ``[(wType, data)]`` of the dnsRecord element set via __setitem__, and its flag."""
-    values, flag, dummy_name = message.elements["dnsRecord"]
+    values, flag, _dummy_name = message.elements["dnsRecord"]
     return [(rec.wType, rec.data) for rec in values], flag
 
 
@@ -308,7 +305,7 @@ def test_remove_last_record_tombstones_atomically():
     assert make_io(samdb).remove(ZONE, "www", dict(SPEC)) is True
     added = samdb.modified[0].added
     assert added[0] == ([target], FakeLdb.FLAG_MOD_DELETE, "dnsRecord")
-    values, flag, dummy_name = added[1]
+    values, flag, _dummy_name = added[1]
     assert flag == FakeLdb.FLAG_MOD_ADD
     assert values[0].wType == FakeDnsp.DNS_TYPE_TOMBSTONE
     assert values[0].dwSerial == 42
@@ -368,7 +365,7 @@ def test_update_swaps_the_value_for_the_new_ttl(serial):
     added = samdb.modified[0].added
     # Compare-and-swap: the exact old value goes, the rebuilt record comes.
     assert added[0] == ([old], FakeLdb.FLAG_MOD_DELETE, "dnsRecord")
-    values, flag, dummy_name = added[1]
+    values, flag, _dummy_name = added[1]
     assert flag == FakeLdb.FLAG_MOD_ADD
     assert (values[0].wType, values[0].data, values[0].dwTtlSeconds, values[0].dwSerial) == (
         FakeDnsp.DNS_TYPE_A, "192.0.2.10", 600, 42)

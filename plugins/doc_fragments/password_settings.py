@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """The password settings shared by samba_password_policy and samba_password_settings."""
@@ -6,7 +5,7 @@
 from __future__ import annotations
 
 
-class ModuleDocFragment(object):
+class ModuleDocFragment:
     """The ``settings`` option, the same for the domain policy and for a PSO."""
 
     DOCUMENTATION = r"""

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the pure password policy logic (no samba required).
@@ -9,7 +8,6 @@ samba-tool), the diff and the domain/PSO orchestration without the bindings."""
 from __future__ import annotations
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_password_policy_logic as logic
 
 DAY = 24 * 60 * 60 * 10000000
@@ -54,7 +52,7 @@ def pso_record(**over):
 
 
 def no_settings(**over):
-    settings = dict((name, None) for name in logic.PSO_ATTRIBUTES)
+    settings = {name: None for name in logic.PSO_ATTRIBUTES}
     settings.update(over)
     return settings
 
@@ -72,14 +70,14 @@ class FakeIO:
         return dict(self.domain)
 
     def pso_dn(self, name):
-        return "CN=%s,CN=Password Settings Container,CN=System,%s" % (name, DOMAIN_DN)
+        return f"CN={name},CN=Password Settings Container,CN=System,{DOMAIN_DN}"
 
     def read_pso(self, name):
         return None if self.pso is None else dict(self.pso)
 
     def resolve_subjects(self, names):
         self.calls.append(("resolve_subjects", list(names)))
-        return sorted(set(self.subjects[name] for name in names))
+        return sorted({self.subjects[name] for name in names})
 
     def add(self, dn, attributes):
         self.calls.append(("add", dn, dict(attributes)))
@@ -234,7 +232,7 @@ def test_run_pso_creates_with_inherited_settings_and_subjects():
     fake = FakeIO(subjects={"Domain Admins": ADMINS_DN})
     result = logic.run_pso(pso_params(settings=no_settings(minimum_length=16)), False, fake)
     assert result["changed"] is True
-    added = [call for call in fake.calls if call[0] == "add"][0][2]
+    added = next(call for call in fake.calls if call[0] == "add")[2]
     assert added["objectClass"] == ["msDS-PasswordSettings"]
     assert added["msDS-PasswordSettingsPrecedence"] == ["10"]
     assert added["msDS-PSOAppliesTo"] == [ADMINS_DN]
@@ -250,7 +248,7 @@ def test_run_pso_creates_with_inherited_settings_and_subjects():
 def test_run_pso_create_without_subjects_omits_the_attribute():
     fake = FakeIO()
     logic.run_pso(pso_params(applies_to=[]), False, fake)
-    added = [call for call in fake.calls if call[0] == "add"][0][2]
+    added = next(call for call in fake.calls if call[0] == "add")[2]
     assert "msDS-PSOAppliesTo" not in added
 
 
@@ -276,7 +274,7 @@ def test_run_pso_modifies_only_the_differences():
         False, fake,
     )
     assert result["changed"] is True
-    changes = [call for call in fake.calls if call[0] == "modify"][0][2]
+    changes = next(call for call in fake.calls if call[0] == "modify")[2]
     assert changes == {
         "msDS-MinimumPasswordLength": ["20"],
         "msDS-PasswordSettingsPrecedence": ["5"],
@@ -289,7 +287,7 @@ def test_run_pso_modifies_only_the_differences():
 def test_run_pso_empty_applies_to_removes_every_assignment():
     fake = FakeIO(pso=pso_record())
     logic.run_pso(pso_params(applies_to=[]), False, fake)
-    changes = [call for call in fake.calls if call[0] == "modify"][0][2]
+    changes = next(call for call in fake.calls if call[0] == "modify")[2]
     assert changes == {"msDS-PSOAppliesTo": []}
 
 

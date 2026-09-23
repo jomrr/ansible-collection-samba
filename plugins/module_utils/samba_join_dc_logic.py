@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Pure, samba-free logic for the ``samba_join_dc`` module.
@@ -45,8 +44,8 @@ def run(params, check_mode, io):
     if current is not None:
         if current["dnsdomain"] != realm:
             raise SambaJoinDcError(
-                "this host is already a domain controller of '%s', not the join target "
-                "'%s'; refusing to overwrite an existing domain" % (current["dnsdomain"], realm)
+                "this host is already a domain controller of '{}', not the join target "
+                "'{}'; refusing to overwrite an existing domain".format(current["dnsdomain"], realm)
             )
         current = {"domaindn": current["domaindn"], "domainsid": current["domainsid"]}
 

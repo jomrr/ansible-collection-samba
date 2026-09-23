@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the samba_ou LDB I/O layer.
@@ -10,9 +9,8 @@ concurrent-change (race) handling."""
 from __future__ import annotations
 
 import pytest
-
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_ou_logic as logic
 from ansible_collections.jomrr.samba.plugins.modules import samba_ou
 
 
@@ -30,7 +28,7 @@ class FakeDn:
 
     def set_component(self, num, name, value):
         self.set_calls.append((num, name, value))
-        self.components[num] = "%s=%s" % (name, value)
+        self.components[num] = f"{name}={value}"
 
     def add_base(self, parent):
         self.base = parent

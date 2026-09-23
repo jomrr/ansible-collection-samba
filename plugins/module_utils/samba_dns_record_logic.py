@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Pure, samba-free logic for the ``samba_dns_record`` module.
@@ -46,7 +45,7 @@ def _ipv6_normalise(addr):
 def _require_uint16(value, field):
     """Validate that an unsigned 16-bit field (port, priority, weight, preference) is in range."""
     if value < 0 or value > _UINT16_MAX:
-        raise SambaDnsRecordError("%s must be between 0 and %d" % (field, _UINT16_MAX))
+        raise SambaDnsRecordError(f"{field} must be between 0 and {_UINT16_MAX}")
 
 
 def validate(params):
@@ -60,9 +59,9 @@ def validate(params):
     ttl = params["ttl"]
 
     if value is None or value == "":
-        raise SambaDnsRecordError("value is required for a %s record" % rtype)
+        raise SambaDnsRecordError(f"value is required for a {rtype} record")
     if ttl < 0 or ttl > 0xFFFFFFFF:
-        raise SambaDnsRecordError("ttl must be between 0 and %d" % 0xFFFFFFFF)
+        raise SambaDnsRecordError(f"ttl must be between 0 and {0xFFFFFFFF}")
 
     spec = {"type": rtype, "value": value, "ttl": ttl}
 
@@ -70,12 +69,12 @@ def validate(params):
         try:
             socket.inet_pton(socket.AF_INET, value)
         except OSError:
-            raise SambaDnsRecordError("value '%s' is not a valid IPv4 address" % value)
+            raise SambaDnsRecordError(f"value '{value}' is not a valid IPv4 address")
     elif rtype == "AAAA":
         try:
             spec["value"] = _ipv6_normalise(value)
         except (OSError, ValueError):
-            raise SambaDnsRecordError("value '%s' is not a valid IPv6 address" % value)
+            raise SambaDnsRecordError(f"value '{value}' is not a valid IPv6 address")
     elif rtype == "MX":
         _require_uint16(params["preference"], "preference")
         spec["preference"] = params["preference"]
@@ -110,7 +109,7 @@ def records_equal(left, right):
             and left["port"] == right["port"]
             and _name_equal(left["value"], right["value"])
         )
-    raise SambaDnsRecordError("unsupported record type '%s'" % rtype)
+    raise SambaDnsRecordError(f"unsupported record type '{rtype}'")
 
 
 def public_state(spec, zone, name, present):
@@ -162,7 +161,7 @@ def run(params, check_mode, io):
     desired = validate(params)
 
     if not io.zone_exists(zone):
-        raise SambaDnsRecordError("zone '%s' does not exist" % zone)
+        raise SambaDnsRecordError(f"zone '{zone}' does not exist")
 
     existing = io.read(zone, name) or []
     current = next((rec for rec in existing if records_equal(desired, rec)), None)

@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to join a host to a domain via adcli, writing a keytab for SSSD."""
@@ -175,11 +173,8 @@ domain:
       sample: /etc/krb5.keytab
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.common.text.converters import to_native
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_join_sssd_logic as logic
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_keytab
 
@@ -234,9 +229,9 @@ class SambaJoinSssdIO:
         except FileNotFoundError:
             return None
         except OSError as err:
-            raise logic.SambaJoinSssdError("cannot read %s: %s" % (keytab, to_native(err)))
+            raise logic.SambaJoinSssdError(f"cannot read {keytab}: {to_native(err)}")
         except samba_keytab.KeytabError as err:
-            raise logic.SambaJoinSssdError("cannot parse %s: %s" % (keytab, to_native(err)))
+            raise logic.SambaJoinSssdError(f"cannot parse {keytab}: {to_native(err)}")
         joined = any(
             keytab_realm.upper() == realm.upper() and is_machine_principal(components)
             for keytab_realm, components in principals
@@ -257,41 +252,39 @@ class SambaJoinSssdIO:
         argv = [
             adcli,
             "join",
-            "--domain=%s" % params["realm"],
-            "--login-user=%s" % params["bind_username"],
-            "--host-keytab=%s" % params["keytab"],
+            "--domain={}".format(params["realm"]),
+            "--login-user={}".format(params["bind_username"]),
+            "--host-keytab={}".format(params["keytab"]),
             "--stdin-password",
         ]
         if params.get("server"):
-            argv.append("--domain-controller=%s" % params["server"])
+            argv.append("--domain-controller={}".format(params["server"]))
         if params.get("host_fqdn"):
-            argv.append("--host-fqdn=%s" % params["host_fqdn"])
+            argv.append("--host-fqdn={}".format(params["host_fqdn"]))
         if params.get("computer_ou"):
-            argv.append("--domain-ou=%s" % params["computer_ou"])
+            argv.append("--domain-ou={}".format(params["computer_ou"]))
 
         # data= feeds the password on stdin; it never appears in argv (and so
         # never in the process list). adcli does not echo it in its output.
-        rc, dummy_out, err = self.module.run_command(argv, data=params["bind_password"])
+        rc, _dummy_out, err = self.module.run_command(argv, data=params["bind_password"])
         if rc != 0:
-            raise logic.SambaJoinSssdError(
-                "adcli join failed (rc=%d): %s" % (rc, to_native(err).strip())
-            )
+            raise logic.SambaJoinSssdError(f"adcli join failed (rc={rc}): {to_native(err).strip()}")
         return {"realm": params["realm"], "keytab": params["keytab"]}
 
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        realm=dict(type="str", required=True),
-        server=dict(type="str"),
-        bind_username=dict(type="str", required=True),
-        bind_password=dict(type="str", no_log=True),
-        computer_ou=dict(type="str"),
-        host_fqdn=dict(type="str"),
-        keytab=dict(type="path", default=DEFAULT_KEYTAB),
-        force=dict(type="bool", default=False),
-        state=dict(type="str", default="present", choices=["present"]),
-    )
+    argument_spec = {
+        "realm": {"type": "str", "required": True},
+        "server": {"type": "str"},
+        "bind_username": {"type": "str", "required": True},
+        "bind_password": {"type": "str", "no_log": True},
+        "computer_ou": {"type": "str"},
+        "host_fqdn": {"type": "str"},
+        "keytab": {"type": "path", "default": DEFAULT_KEYTAB},
+        "force": {"type": "bool", "default": False},
+        "state": {"type": "str", "default": "present", "choices": ["present"]},
+    }
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     join_io = SambaJoinSssdIO(module)
@@ -300,11 +293,6 @@ def main():
         result = logic.run(module.params, module.check_mode, join_io)
     except logic.SambaJoinSssdError as exc:
         module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_join_sssd failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
 
     module.exit_json(**result)
 

@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
-"""Samba DNS record build/extract helpers for the samba_dns_record module.
+"""Samba DNS helpers: records for samba_dns_record, zone reads for the zone modules.
 
 All ``samba`` imports (``samba.dcerpc.dnsp``, ``samba.ndr``) are lazy, via
 importlib inside the functions - importing this module never requires the
@@ -10,15 +9,19 @@ is ``dnsp.DnssrvRpcRecord`` (verified against samba 4.23.8), not the wire
 ``dnsserver.DNS_RPC_RECORD``.
 
 These helpers translate between the plain "spec" dicts used by the samba-free
-logic layer and the ``dnsp`` records stored in the directory.
+logic layer and the ``dnsp`` records stored in the directory. The zone reads
+return a zone's aging properties from its ``dNSProperty`` attribute, decoded as
+``dnsp.DnsProperty`` the way the DNS server itself reads them.
 """
 
 from __future__ import annotations
 
 import importlib
 import time
+from collections.abc import Iterable
 
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_record_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_zone_logic as zone_logic
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 
 #: Record types this module builds/extracts (the eight managed types).
@@ -189,7 +192,7 @@ def find_zone_dn(samdb, zone):
     res = samdb.search(
         base="",
         scope=ldb.SCOPE_SUBTREE,
-        expression="(&(objectClass=dnsZone)(name=%s))" % ldb.binary_encode(zone),
+        expression=f"(&(objectClass=dnsZone)(name={ldb.binary_encode(zone)}))",
         attrs=["name"],
         controls=["search_options:0:2"],
     )
@@ -197,26 +200,55 @@ def find_zone_dn(samdb, zone):
 
 
 def list_zone_entries(samdb, zone=None):
-    """Return ``(name, dn)`` for dnsZone objects across the DNS partitions.
+    """Return ``(name, dn, stored)`` for dnsZone objects across the DNS partitions.
 
-    With ``zone`` given, returns at most that one zone (escaped via
-    ``ldb.binary_encode`` before it enters the filter); otherwise every zone. The
-    phantom-root control reaches the DomainDnsZones/ForestDnsZones application
-    partitions - the same search ``find_zone_dn`` uses.
+    ``stored`` holds the zone's aging properties (see
+    :func:`decode_zone_properties`). With ``zone`` given, returns at most that one
+    zone (escaped via ``ldb.binary_encode`` before it enters the filter);
+    otherwise every zone. The phantom-root control reaches the
+    DomainDnsZones/ForestDnsZones application partitions - the same search
+    ``find_zone_dn`` uses.
     """
     ldb = samba_ldb.load_ldb()
     if zone is None:
         expression = "(objectClass=dnsZone)"
     else:
-        expression = "(&(objectClass=dnsZone)(name=%s))" % ldb.binary_encode(zone)
+        expression = f"(&(objectClass=dnsZone)(name={ldb.binary_encode(zone)}))"
     res = samdb.search(
         base="",
         scope=ldb.SCOPE_SUBTREE,
         expression=expression,
-        attrs=["name"],
+        attrs=["name", "dNSProperty"],
         controls=["search_options:0:2"],
     )
-    return [(samba_ldb.first_value(message, "name"), message.dn) for message in res]
+    return [
+        (samba_ldb.first_value(message, "name"), message.dn, decode_zone_properties(message.get("dNSProperty")))
+        for message in res
+    ]
+
+
+def decode_zone_properties(element: Iterable[bytes] | None) -> dict[str, int]:
+    """Return the aging properties a zone's ``dNSProperty`` values store, by parameter.
+
+    Mirrors the DNS server's own read (``dns_get_zone_properties``): a value that
+    does not unpack as ``dnsp.DnsProperty`` is skipped, and a later value for the
+    same property wins. Properties the zone does not store are left out.
+    """
+    if element is None:
+        return {}
+    ndr = load_ndr()
+    dnsp = load_dnsp()
+    params = {getattr(dnsp, option.dnsp_property): option.param for option in zone_logic.ZONE_OPTIONS}
+    stored = {}
+    for value in element:
+        try:
+            prop = ndr.ndr_unpack(dnsp.DnsProperty, value)
+        except RuntimeError:
+            continue
+        param = params.get(prop.id)
+        if param is not None:
+            stored[param] = prop.data
+    return stored
 
 
 def read_node_specs(samdb, node_dn):

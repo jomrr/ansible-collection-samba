@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to manage DNS zones in a Samba AD DC."""
@@ -19,9 +17,11 @@ description:
     zones with secure dynamic updates enabled. Whether a zone is forward or
     reverse is determined by its O(name) (a reverse zone is named under
     C(in-addr.arpa) or C(ip6.arpa)).
-  - Zone existence is read through C(samba.samdb.SamDB) over LDAP; create and
-    delete go through the C(dnsserver) RPC, authenticated and sealed with the same
-    caller credentials.
+  - Sets the zone's record aging like C(samba-tool dns zoneoptions).
+  - Zone existence and aging options (C(dNSProperty)) are read through
+    C(samba.samdb.SamDB) over LDAP; create, delete and option writes go through
+    the C(dnsserver) RPC, authenticated and sealed with the same caller
+    credentials.
   - The module is idempotent and supports check mode.
 author:
   - Jonas Mauer (@jomrr)
@@ -29,12 +29,36 @@ requirements:
   - The C(samba) Python bindings (C(python3-samba)) on the host that runs the
     module, with the DC's C(dnsserver) RPC reachable from it.
 options:
+  aging:
+    description:
+      - Enable record aging (C(samba-tool dns zoneoptions --aging)).
+      - A dynamic record not refreshed within O(norefresh_interval) plus
+        O(refresh_interval) becomes eligible for scavenging.
+      - Not managed if omitted. Requires O(state=present).
+    type: bool
+    version_added: 2.1.0
   name:
     description:
       - The zone name, for example C(example.com) for a forward zone or
         C(2.0.192.in-addr.arpa) for a reverse zone.
     type: str
     required: true
+  norefresh_interval:
+    description:
+      - No-refresh interval in hours (C(--norefreshinterval)); within it an
+        update does not refresh a record's time stamp.
+      - C(0) to C(87600); C(0) selects the DC's default.
+      - Not managed if omitted. Requires O(state=present).
+    type: int
+    version_added: 2.1.0
+  refresh_interval:
+    description:
+      - Refresh interval in hours (C(--refreshinterval)), following the
+        no-refresh interval.
+      - C(0) to C(87600); C(0) selects the DC's default.
+      - Not managed if omitted. Requires O(state=present).
+    type: int
+    version_added: 2.1.0
   replication:
     description:
       - The replication scope of the zone, selected by the directory partition it
@@ -71,6 +95,14 @@ notes:
     is the simplest topology.
   - Only primary, AD-integrated zones are managed (the set C(samba-tool dns
     zonecreate) supports).
+  - The DC removes aged records only with C(dns zone scavenging = yes) in its
+    C(smb.conf); this module does not manage C(smb.conf).
+  - Do not enable scavenging on a domain created before Samba 4.9; its static
+    records may be marked dynamic and would be removed.
+  - The intervals are written before O(aging). A property the zone does not
+    store counts as C(0).
+  - Records created by C(jomrr.samba.samba_dns_record) are static and never
+    scavenged.
 """
 
 EXAMPLES = r"""
@@ -88,6 +120,14 @@ EXAMPLES = r"""
   jomrr.samba.samba_dns_zone:
     name: forest.example.com
     replication: forest
+    state: present
+
+- name: Enable record aging with one-week intervals
+  jomrr.samba.samba_dns_zone:
+    name: example.com
+    aging: true
+    norefresh_interval: 168
+    refresh_interval: 168
     state: present
 
 - name: Remove a zone (and all its records)
@@ -117,21 +157,43 @@ zone:
       returned: when the zone is present
       type: str
       sample: domain
+    aging:
+      description:
+        - Whether record aging is enabled.
+        - C(null) in check mode if the zone would be created and O(aging) is
+          not set.
+      returned: when the zone is present
+      type: bool
+      sample: true
+      version_added: 2.1.0
+    norefresh_interval:
+      description:
+        - The no-refresh interval in hours; C(0) is the DC's default.
+        - C(null) in check mode if the zone would be created and
+          O(norefresh_interval) is not set.
+      returned: when the zone is present
+      type: int
+      sample: 168
+      version_added: 2.1.0
+    refresh_interval:
+      description:
+        - The refresh interval in hours; C(0) is the DC's default.
+        - C(null) in check mode if the zone would be created and
+          O(refresh_interval) is not set.
+      returned: when the zone is present
+      type: int
+      sample: 168
+      version_added: 2.1.0
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_io
-from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_conn
+from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_conn, samba_dns_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_dns_zone_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
 
 
 class SambaDnsZoneIO:
-    """Zone I/O: existence via local LDB, create/delete via the dnsserver RPC.
+    """Zone I/O: state via local LDB; create, delete and options via the dnsserver RPC.
 
     The RPC connection (caller credentials) is opened lazily, only when a write
     is actually performed - check-mode and idempotent runs touch the LDB only.
@@ -149,9 +211,10 @@ class SambaDnsZoneIO:
             self._conn, self._server = samba_dns_conn.connect_dnsserver(self.module)
         return self._conn
 
-    def zone_exists(self, name):
-        """True if the zone exists (read from the local directory)."""
-        return samba_dns_io.find_zone_dn(self.samdb, name) is not None
+    def read_options(self, name: str) -> dict[str, int] | None:
+        """Return the zone's stored aging properties, or None if it does not exist."""
+        entries = samba_dns_io.list_zone_entries(self.samdb, name)
+        return entries[0][2] if entries else None
 
     def create(self, name, replication):
         """Create the zone; return False if it already existed (race)."""
@@ -161,29 +224,30 @@ class SambaDnsZoneIO:
         """Delete the zone; return False if it was already gone (race)."""
         return samba_dns_conn.delete_zone(self._rpc(), self._server, name)
 
+    def set_properties(self, name: str, writes: list[tuple[str, int]]) -> None:
+        """Write the zone properties in the given order."""
+        conn = self._rpc()
+        for property_name, value in writes:
+            samba_dns_conn.set_zone_property(conn, self._server, name, property_name, value)
+
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        name=dict(type="str", required=True),
-        replication=dict(type="str", default="domain", choices=logic.REPLICATION_CHOICES),
-        state=dict(type="str", default="present", choices=["present", "absent"]),
-    )
+    argument_spec = {
+        "name": {"type": "str", "required": True},
+        "aging": {"type": "bool"},
+        "norefresh_interval": {"type": "int"},
+        "refresh_interval": {"type": "int"},
+        "replication": {"type": "str", "default": "domain", "choices": logic.REPLICATION_CHOICES},
+        "state": {"type": "str", "default": "present", "choices": ["present", "absent"]},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True)
 
     samdb = connect_samdb(module)
     zone_io = SambaDnsZoneIO(module, samdb)
 
-    try:
-        result = logic.run(module.params, module.check_mode, zone_io)
-    except logic.SambaDnsZoneError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_dns_zone failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    result = run_or_fail(module, "samba_dns_zone", (logic.SambaDnsZoneError,), lambda: logic.run(module.params, module.check_mode, zone_io))
 
     module.exit_json(**result)
 

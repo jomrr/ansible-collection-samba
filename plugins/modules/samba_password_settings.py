@@ -1,5 +1,3 @@
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Ansible module to manage fine-grained password settings objects in a Samba AD DC."""
@@ -174,25 +172,21 @@ settings:
       sample: false
 """
 
-import traceback
-
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.common.text.converters import to_native
-
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec
-from ansible_collections.jomrr.samba.plugins.module_utils.samba_password_policy_io import PasswordPolicyIO
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_password_policy_logic as logic
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import connect_samdb, connection_argument_spec, run_or_fail
+from ansible_collections.jomrr.samba.plugins.module_utils.samba_password_policy_io import PasswordPolicyIO
 
 
 def main():
     """Module entry point."""
-    argument_spec = dict(
-        name=dict(type="str", required=True),
-        precedence=dict(type="int"),
-        applies_to=dict(type="list", elements="str", default=[]),
-        settings=dict(type="dict", default={}, options=logic.settings_argument_spec()),
-        state=dict(type="str", default="present", choices=["present", "absent"]),
-    )
+    argument_spec = {
+        "name": {"type": "str", "required": True},
+        "precedence": {"type": "int"},
+        "applies_to": {"type": "list", "elements": "str", "default": []},
+        "settings": {"type": "dict", "default": {}, "options": logic.settings_argument_spec()},
+        "state": {"type": "str", "default": "present", "choices": ["present", "absent"]},
+    }
     argument_spec.update(connection_argument_spec())
     module = AnsibleModule(
         argument_spec=argument_spec,
@@ -203,15 +197,10 @@ def main():
     samdb = connect_samdb(module)
     policy_io = PasswordPolicyIO(samdb)
 
-    try:
-        result = logic.run_pso(module.params, module.check_mode, policy_io)
-    except logic.SambaPasswordPolicyError as exc:
-        module.fail_json(msg=to_native(exc))
-    except Exception as exc:
-        module.fail_json(
-            msg="samba_password_settings failed: %s" % to_native(exc),
-            exception=traceback.format_exc(),
-        )
+    result = run_or_fail(
+        module, "samba_password_settings", (logic.SambaPasswordPolicyError,),
+        lambda: logic.run_pso(module.params, module.check_mode, policy_io),
+    )
 
     module.exit_json(**result)
 

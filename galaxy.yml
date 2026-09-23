@@ -39,6 +39,7 @@ build_ignore:
   - Makefile
   - .mypy_cache
   - "*/.mypy_cache"
+  - .ruff_cache
   - .pytest_cache
   - "*/.pytest_cache"
   - tests/output

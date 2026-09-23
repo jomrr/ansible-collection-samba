@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE)
 """Unit tests for the password policy I/O layer and the two modules' imports.
@@ -10,12 +9,10 @@ and modify messages and the subject resolution."""
 from __future__ import annotations
 
 import pytest
-
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_password_policy_io as policy_io
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_password_policy_logic as logic
-from ansible_collections.jomrr.samba.plugins.modules import samba_password_policy
-from ansible_collections.jomrr.samba.plugins.modules import samba_password_settings
+from ansible_collections.jomrr.samba.plugins.modules import samba_password_policy, samba_password_settings
 
 
 def test_modules_import_without_samba():
@@ -34,7 +31,7 @@ class FakeDn:
 
     def set_component(self, num, name, value):
         self.set_calls.append((num, name, value))
-        self.text = "%s=%s" % (name, value)
+        self.text = f"{name}={value}"
 
     def add_base(self, parent):
         self.text = self.text + "," + parent.text
@@ -77,7 +74,7 @@ class FakeLdb:
         return (list(values), flag, name)
 
     def binary_encode(self, value):
-        return "ESC(%s)" % value
+        return f"ESC({value})"
 
 
 class FakeSamDB:
@@ -102,7 +99,7 @@ class FakeSamDB:
                 raise FakeLdbError(FakeLdb.ERR_NO_SUCH_OBJECT, "no such object")
             return [self.records[str(base)]]
         for name, result in self.subjects.items():
-            if "(sAMAccountName=ESC(%s))" % name in expression:
+            if f"(sAMAccountName=ESC({name}))" in expression:
                 return result
         return []
 

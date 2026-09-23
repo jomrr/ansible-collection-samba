@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Shared, samba-free decision of the lifecycle modules.
@@ -33,7 +32,7 @@ def ensure(current, params, check_mode, perform, error_cls, flag, secret, action
         return {"changed": False, flag: True, "domain": current}
 
     if not params.get(secret):
-        raise error_cls("%s is required to %s" % (secret, action))
+        raise error_cls(f"{secret} is required to {action}")
 
     if check_mode:
         return {"changed": True, flag: current is not None, "domain": current}

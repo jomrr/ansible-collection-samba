@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright: (c) 2026, Jonas Mauer
 # GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
 """Shared connection layer for the jomrr.samba modules.
@@ -33,10 +32,14 @@ import importlib.util
 import ipaddress
 import os
 import traceback
+from collections.abc import Callable
+from typing import TypeVar
 
-from ansible.module_utils.basic import missing_required_lib
-
+from ansible.module_utils.basic import AnsibleModule, missing_required_lib
+from ansible.module_utils.common.text.converters import to_native
 from ansible_collections.jomrr.samba.plugins.module_utils import samba_ldb
+
+_Result = TypeVar("_Result")
 
 
 def connection_argument_spec():
@@ -45,12 +48,12 @@ def connection_argument_spec():
     Merged into every module's argument_spec; documented by the
     ``jomrr.samba.connection`` doc fragment.
     """
-    return dict(
-        server=dict(type="str", required=True),
-        bind_username=dict(type="str", required=True),
-        bind_password=dict(type="str", required=True, no_log=True),
-        realm=dict(type="str"),
-    )
+    return {
+        "server": {"type": "str", "required": True},
+        "bind_username": {"type": "str", "required": True},
+        "bind_password": {"type": "str", "required": True, "no_log": True},
+        "realm": {"type": "str"},
+    }
 
 
 #: Kerberos policy choices of the join modules. The object modules have no
@@ -83,6 +86,37 @@ def fail_without_bindings(module) -> None:
         module.fail_json(msg=missing_required_lib("samba"))
 
 
+def binding_errors() -> tuple[type[Exception], ...]:
+    """Return the exception types a Samba operation is expected to raise.
+
+    ``ldb.LdbError`` for directory access, ``RuntimeError`` for the RPC,
+    authentication and NDR layers (``samba.WERRORError`` and
+    ``samba.NTSTATUSError`` derive from it) and ``OSError`` for local files.
+    ``ldb`` is imported lazily, so call this only once the bindings were found.
+    """
+    return (samba_ldb.load_ldb().LdbError, RuntimeError, OSError)
+
+
+def run_or_fail(
+    module: AnsibleModule,
+    name: str,
+    domain_errors: tuple[type[Exception], ...],
+    operation: Callable[[], _Result],
+) -> _Result:
+    """Return ``operation()``, turning its expected failures into ``fail_json``.
+
+    ``domain_errors`` already carry a user-facing message. The errors of
+    :func:`binding_errors` are reported with the module name and traceback.
+    Any other exception is a defect and is left to Ansible's own handler.
+    """
+    try:
+        return operation()
+    except domain_errors as exc:
+        module.fail_json(msg=to_native(exc))
+    except binding_errors() as exc:
+        module.fail_json(msg=f"{name} failed: {to_native(exc)}", exception=traceback.format_exc())
+
+
 def realm_from_server(server):
     """Return the realm a fully qualified host name implies, or None.
 
@@ -91,7 +125,7 @@ def realm_from_server(server):
     ``None`` - guessing one (``DC1``, ``0.2.10``) would only surface later as a
     cryptic Kerberos error.
     """
-    dummy_host, dot, domain = server.partition(".")
+    _dummy_host, dot, domain = server.partition(".")
     if not dot or not domain:
         return None
     try:
@@ -115,7 +149,7 @@ def _bind_realm(module):
     if derived is None:
         module.fail_json(
             msg="realm is required when server is not a fully qualified host name "
-                "(got '%s'); give the Kerberos realm explicitly" % server
+                f"(got '{server}'); give the Kerberos realm explicitly"
         )
     return derived
 
@@ -132,7 +166,7 @@ def build_credentials(module):
     reported without echoing any credential.
     """
     credentials = importlib.import_module("samba.credentials")
-    os.environ["KRB5CCNAME"] = "MEMORY:jomrr_samba_%d" % os.getpid()
+    os.environ["KRB5CCNAME"] = f"MEMORY:jomrr_samba_{os.getpid()}"
     creds = credentials.Credentials()
     creds.set_username(module.params["bind_username"])
     creds.set_password(module.params["bind_password"])
@@ -164,9 +198,10 @@ def connect_samdb(module):
 
     creds = build_credentials(module)
     server = module.params["server"]
+    ldb = samba_ldb.load_ldb()
     try:
-        return samdb_mod.SamDB(url="ldap://%s" % server, credentials=creds, lp=load_parm)
-    except Exception as exc:
+        return samdb_mod.SamDB(url=f"ldap://{server}", credentials=creds, lp=load_parm)
+    except ldb.LdbError as exc:
         module.fail_json(msg=_connect_error(module, creds, load_parm, exc))
 
 
@@ -197,20 +232,19 @@ def _connect_error(module, creds, load_parm, exc):
     scrubs it anyway).
     """
     server = module.params["server"]
-    principal = "%s@%s" % (module.params["bind_username"], _bind_realm(module))
+    principal = "{}@{}".format(module.params["bind_username"], _bind_realm(module))
     cause = samba_ldb.error_text(exc)
     if any(status in cause for status in _TRANSPORT_STATUS):
-        return "could not reach the Samba AD DC at '%s' over LDAP (port 389): %s" % (server, cause)
+        return f"could not reach the Samba AD DC at '{server}' over LDAP (port 389): {cause}"
     try:
-        creds.get_named_ccache(load_parm, "MEMORY:jomrr_samba_diag_%d" % os.getpid())
-    except Exception as kerberos_exc:
+        creds.get_named_ccache(load_parm, f"MEMORY:jomrr_samba_diag_{os.getpid()}")
+    except RuntimeError as kerberos_exc:
         return (
-            "could not connect to the Samba AD DC at '%s' as '%s': no Kerberos ticket could "
-            "be obtained (%s); LDAP reported: %s"
-            % (server, principal, samba_ldb.error_text(kerberos_exc), cause)
+            f"could not connect to the Samba AD DC at '{server}' as '{principal}': no Kerberos ticket could "
+            f"be obtained ({samba_ldb.error_text(kerberos_exc)}); LDAP reported: {cause}"
         )
     return (
-        "could not connect to the Samba AD DC at '%s' as '%s': a Kerberos ticket was obtained "
-        "but the GSSAPI sign+seal LDAP bind failed (%s); check that the DC offers sealing and "
-        "that '%s' is the DC's host name as registered in Kerberos" % (server, principal, cause, server)
+        f"could not connect to the Samba AD DC at '{server}' as '{principal}': a Kerberos ticket was obtained "
+        f"but the GSSAPI sign+seal LDAP bind failed ({cause}); check that the DC offers sealing and "
+        f"that '{server}' is the DC's host name as registered in Kerberos"
     )
