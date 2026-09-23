@@ -1,8 +1,18 @@
 =============================
-jomrr.samba 2.0 Release Notes
+jomrr.samba 2.1 Release Notes
 =============================
 
 .. contents:: Topics
+
+v2.1.0
+======
+
+Minor Changes
+-------------
+
+- samba_dns_zone - C(aging), C(norefresh_interval) and C(refresh_interval) manage a zone's record aging like C(samba-tool dns zoneoptions).
+- samba_dns_zone - a refused zone property write names the property and the zone.
+- samba_dns_zone_info - each zone reports its C(aging), C(norefresh_interval) and C(refresh_interval).
 
 v2.0.0
 ======

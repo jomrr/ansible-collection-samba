@@ -294,3 +294,15 @@ releases:
         name: samba_schema_extension
         namespace: ''
     release_date: '2026-09-12'
+  2.1.0:
+    changes:
+      minor_changes:
+        - samba_dns_zone - C(aging), C(norefresh_interval) and C(refresh_interval)
+          manage a zone's record aging like C(samba-tool dns zoneoptions).
+        - samba_dns_zone - a refused zone property write names the property and the
+          zone.
+        - samba_dns_zone_info - each zone reports its C(aging), C(norefresh_interval)
+          and C(refresh_interval).
+    fragments:
+      - dns-zone-aging.yml
+    release_date: '2026-09-23'
