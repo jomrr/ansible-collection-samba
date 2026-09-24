@@ -1,0 +1,7 @@
+---
+minor_changes:
+  - New module samba_computer to keep an existing computer account in a container or OU (a move,
+    idempotent, with check mode); the default is the domain's Computers container, domain controller
+    accounts are never matched, and accounts are never created or deleted.
+  - New module samba_computer_info to query computer accounts, the same accounts samba_computer
+    manages (domain controllers and managed service accounts excluded).

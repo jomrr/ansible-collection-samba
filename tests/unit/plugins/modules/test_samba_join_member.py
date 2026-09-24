@@ -196,8 +196,8 @@ class FakeNet:
         self.server = server
         self.captured = None
 
-    def join_member(self, netbios_name, machinepass=None):
-        self.captured = {"netbios_name": netbios_name, "machinepass": machinepass}
+    def join_member(self, netbios_name, **kwargs):
+        self.captured = {"netbios_name": netbios_name, **kwargs}
         return ("S-1-5-21-7", "SAMDOM")
 
 
@@ -217,6 +217,7 @@ def _join_params(**over):
         "bind_username": "Administrator",
         "bind_password": "S3cret-Passw0rd!",
         "machinepass": "M@chine-Passw0rd!",
+        "computer_ou": None,
         "use_kerberos": "required",
         "force": False,
         "state": "present",
@@ -247,6 +248,8 @@ def test_io_join_maps_parameters_and_uses_credentials(monkeypatch):
     # lesson), and the machine password is forwarded through the kwarg.
     assert cap["netbios_name"] == "DERIVEDNB"
     assert cap["machinepass"] == "M@chine-Passw0rd!"
+    # No OU requested: createcomputer is not passed at all (the binding rejects None).
+    assert "createcomputer" not in cap
     assert net_s3.last.server == "dc1.samdom.example.com"
     # The s3 LoadParm was loaded from the existing smb.conf the role provides.
     assert s3param.context.loaded == "/etc/samba/smb.conf"
@@ -287,6 +290,16 @@ def test_io_join_machinepass_none_is_passed_through(monkeypatch):
     samba_join_member.SambaJoinMemberIO(module=None).join(_join_params(machinepass=None))
 
     assert net_s3.last.captured["machinepass"] is None
+
+
+def test_io_join_computer_ou_is_forwarded_as_createcomputer(monkeypatch):
+    net_s3 = FakeNetS3Mod()
+    _patch_join_imports(monkeypatch, net_s3, FakeCredentialsMod(), FakeS3Param())
+
+    ou = "OU=Servers,DC=samdom,DC=example,DC=com"
+    samba_join_member.SambaJoinMemberIO(module=None).join(_join_params(computer_ou=ou))
+
+    assert net_s3.last.captured["createcomputer"] == ou
 
 
 def test_io_join_failure_is_clean_error(monkeypatch):

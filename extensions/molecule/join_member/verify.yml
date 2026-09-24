@@ -2,6 +2,8 @@
 # Verify samba_join_member produced a real member AND that the full
 # idmap-ad/RFC2307 chain works. Runs on the member hosts.
 #   - join effect + idempotency + check mode (the module's contract);
+#   - computer_ou: after the account was deleted on the DC, the forced re-join
+#     creates it anew in the OU;
 #   - net ads testjoin confirms the machine account is valid;
 #   - winbind is brought up (FIXTURE) and then THE CORE PROOF: a user seeded on
 #     the DC with an explicit uidNumber resolves on the member, via idmap_ad,
@@ -11,6 +13,9 @@
 - name: Verify
   hosts: member
   gather_facts: false
+  vars:
+    # Created on the DC in prepare.yml; the forced re-join creates the account here.
+    _servers_ou: "OU=Servers,DC={{ samba_realm | lower | split('.') | join(',DC=') }}"
   tasks:
     # --- the module's contract (no daemon needed) ---
     - name: Verify | A second samba_join_member run is an idempotent no-op
@@ -46,14 +51,30 @@
           - _check is not changed
           - _check.joined is true
 
+    - name: Verify | Delete the member's computer account on the DC
+      # The case force exists for: the computer object was deleted on the domain.
+      # The re-join below has to create it anew, which is when computer_ou
+      # applies; an existing account would keep its place (samba only resets its
+      # password where it is).
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - computer
+          - delete
+          - "{{ _again.domain.netbios_name }}"
+      delegate_to: "{{ target_dc }}"
+      changed_when: true
+
     - name: Verify | force re-joins an already joined member (deliberate re-join)
       # The only way to re-establish the machine account; the testjoin below then
-      # proves the forced re-join left a valid account behind.
+      # proves the forced re-join left a valid account behind, created in
+      # computer_ou.
       jomrr.samba.samba_join_member:
         realm: "{{ samba_realm }}"
         server: "{{ target_dc }}.{{ samba_realm | lower }}"
         bind_username: Administrator
         bind_password: "{{ samba_admin_password }}"
+        computer_ou: "{{ _servers_ou }}"
         force: true
         state: present
       register: _forced
@@ -63,6 +84,24 @@
         that:
           - _forced is changed
           - _forced.joined is true
+
+    - name: Verify | Read the member's computer account on the DC
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - computer
+          - show
+          - "{{ _forced.domain.netbios_name }}"
+          - "--attributes=distinguishedName"
+      delegate_to: "{{ target_dc }}"
+      register: _computer
+      changed_when: false
+
+    - name: Verify | The re-join created the computer account in computer_ou
+      ansible.builtin.assert:
+        that:
+          - ("CN=" ~ _forced.domain.netbios_name ~ "," ~ _servers_ou) | lower in _computer.stdout | lower
+        fail_msg: "expected the account in {{ _servers_ou }}, got '{{ _computer.stdout }}'"
 
     - name: Verify | net ads testjoin confirms the machine account is valid
       ansible.builtin.command:

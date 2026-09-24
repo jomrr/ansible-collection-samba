@@ -453,6 +453,36 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
   "`secrets.tdb` presence as the weaker fallback" was the right instinct in the
   wrong role and was never implemented; it is superseded by this decision.
 
+### Computer account location (samba_join_member `computer_ou`, samba_computer)
+
+- **The join only creates (2.2.0).** `computer_ou` is passed to the join as
+  `createcomputer`: an account the join creates lands in that OU, which a
+  delegation limited to the OU needs. An existing account is not moved.
+- **Why the join cannot move (verified live, samba 4.24.6).**
+  `libnet_join_precreate_machine_acct` has a move branch for an account that
+  already exists, but it is unreachable: `ads_create_machine_acct` finds the
+  existing account itself, only resets its password over LDAP and reports
+  success. A forced re-join with `createcomputer` left the account in
+  `CN=Computers` on all four distros; a join that had to create the account
+  (after it was deleted on the DC) put it into the OU.
+- **Moving belongs in `samba_computer` (decided 2026-09-25).** A move needs an
+  authenticated LDAP connection (`connect_samdb`), and on a member that needs
+  DC-side libraries a client install lacks - verified live: without them the
+  bind is anonymous on Debian/Ubuntu (no `ildap`, `samba-dsdb-modules`), fails
+  on openSUSE (`samba-ldb-ldap`), and `samba.samdb` is missing on Fedora
+  (`python3-samba-dc`, `samba-ldb-ldap-modules`). So the move is the job of
+  the object module `samba_computer`, which runs against the DC through the
+  action group like `samba_user`, where the libraries are present. The members
+  stay lean, the join modules stay purely local, and one behaviour covers every
+  computer: Windows clients, SSSD hosts (`adcli --domain-ou` is create-only as
+  well) and Samba members.
+- **samba_computer scope.** Move only: `name` + `path`; the account must exist,
+  the module never creates or deletes one. An omitted `path` means the domain's
+  default Computers container (the well-known object, so a redirection is
+  honoured), like `samba_user` and the Users container. Domain controller
+  accounts (DC and RODC) are never matched, so a DC is never moved out of
+  `OU=Domain Controllers`. `samba_computer_info` queries the same accounts.
+
 ### Open design points
 
 - **check_mode:** joining cannot be dry-run; check_mode reads the join state

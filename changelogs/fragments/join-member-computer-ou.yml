@@ -1,0 +1,4 @@
+---
+minor_changes:
+  - samba_join_member - new option C(computer_ou) to create the machine account in a given OU,
+    as samba_join_sssd offers; an existing account is not moved.

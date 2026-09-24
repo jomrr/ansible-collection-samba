@@ -8,6 +8,8 @@ action_groups:
     - samba_user_info
     - samba_group
     - samba_group_info
+    - samba_computer
+    - samba_computer_info
     - samba_ou
     - samba_ou_info
     - samba_dns_record

@@ -329,6 +329,24 @@
         path: "OU=loc_b,{{ samba_base_dn }}"
         state: present
 
+    - name: Converge | Move a computer account into an OU (idempotent move)
+      jomrr.samba.samba_computer:
+        name: WS01
+        path: "OU=loc_a,{{ samba_base_dn }}"
+
+    - name: Converge | Move a computer account back to the default container (path omitted)
+      jomrr.samba.samba_computer:
+        name: WS02
+
+    - name: Converge | A domain controller's account is never matched as a computer
+      # The DC's own machine account is a computer object too. The module must
+      # not see it, otherwise a path would move the DC out of its OU.
+      jomrr.samba.samba_computer:
+        name: "{{ inventory_hostname | upper }}"
+        path: "OU=loc_a,{{ samba_base_dn }}"
+      register: _dc_computer
+      failed_when: _dc_computer is not failed or 'does not exist' not in _dc_computer.msg
+
     - name: Converge | Remove a group's description (empty string)
       jomrr.samba.samba_group:
         name: gclear

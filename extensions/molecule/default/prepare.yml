@@ -363,6 +363,19 @@
             path: "OU=loc_a,{{ samba_base_dn }}"
             state: present
 
+        - name: Prepare | seed | computer account converge will move into an OU
+          # No module creates computer accounts (samba_computer only places
+          # them; joins create them), so the seeds use samba-tool. This one
+          # lands in the default Computers container.
+          ansible.builtin.command:
+            argv: [samba-tool, computer, add, WS01]
+          changed_when: true
+
+        - name: Prepare | seed | computer account converge will move back to the default container
+          ansible.builtin.command:
+            argv: [samba-tool, computer, add, WS02, --computerou=OU=loc_b]
+          changed_when: true
+
         - name: Prepare | seed | user whose attributes converge will remove
           jomrr.samba.samba_user:
             username: clearattr

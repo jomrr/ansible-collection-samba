@@ -7,8 +7,8 @@ authors:
 description: >-
   Provision Samba AD domain controllers, join hosts to a domain (DC, member
   server, SSSD), extend the schema (LAPS, OpenSSH keys) and manage users,
-  groups, OUs, password policies, DNS zones and records via the native Python
-  bindings.
+  groups, computer accounts, OUs, password policies, DNS zones and records via
+  the native Python bindings.
 license_file: LICENSE
 tags:
   - samba

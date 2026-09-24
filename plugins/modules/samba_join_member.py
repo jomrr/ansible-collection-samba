@@ -77,6 +77,17 @@ options:
       - B(Security) - marked C(no_log); never appears in the return value, diff
         or an error.
     type: str
+  computer_ou:
+    description:
+      - The LDAP DN of an organizational unit to create the computer account in,
+        for example C(OU=Servers,DC=samdom,DC=example,DC=com). If omitted, the
+        domain's default computers container is used.
+      - The OU must already exist; otherwise the join fails.
+      - Only applied when the join creates the computer account. An existing
+        account is not moved, not even by a re-join with I(force), which resets
+        its password where it is; use C(jomrr.samba.samba_computer) to move it.
+    type: str
+    version_added: 2.2.0
   use_kerberos:
     description:
       - How the join authenticates to the existing domain controller.
@@ -121,6 +132,8 @@ seealso:
     description: Join a host as an additional domain controller instead of a member.
   - module: jomrr.samba.samba_provision
     description: Provision a brand-new domain instead of joining an existing one.
+  - module: jomrr.samba.samba_computer
+    description: Move the member's computer account into another container on the DC.
 """
 
 EXAMPLES = r"""
@@ -139,6 +152,15 @@ EXAMPLES = r"""
     bind_username: Administrator
     bind_password: "{{ vault_domain_admin_password }}"
     machinepass: "{{ vault_machine_password }}"
+    state: present
+
+- name: Join as a member into a dedicated OU
+  jomrr.samba.samba_join_member:
+    realm: SAMDOM.EXAMPLE.COM
+    server: dc1.samdom.example.com
+    bind_username: Administrator
+    bind_password: "{{ vault_domain_admin_password }}"
+    computer_ou: OU=Servers,DC=samdom,DC=example,DC=com
     state: present
 
 - name: Re-establish the machine account of an already joined member
@@ -248,7 +270,8 @@ class SambaJoinMemberIO:
 
         Mirrors the verified C(samba-tool domain join MEMBER) path: build the s3
         ``LoadParm`` from the existing smb.conf and call
-        ``net_s3.Net(creds, s3_lp, server).join_member(netbios_name, machinepass)``.
+        ``net_s3.Net(creds, s3_lp, server).join_member(netbios_name, machinepass)``,
+        plus ``createcomputer`` when O(computer_ou) is set.
         The bind password reaches samba only through the credentials object (never
         an argv); C(machinepass=None) is the verified-safe default samba-tool
         itself passes (the binding generates a strong machine password). A failure
@@ -280,9 +303,15 @@ class SambaJoinMemberIO:
         s3_lp = s3param.get_context()
         s3_lp.load(smb_conf)
 
+        join_kwargs = {"machinepass": params["machinepass"]}
+        # createcomputer is parsed as a plain string by the binding (None is
+        # rejected), so it is only passed when an OU is requested.
+        if params.get("computer_ou"):
+            join_kwargs["createcomputer"] = params["computer_ou"]
+
         net = net_s3.Net(creds, s3_lp, server=params["server"])
         try:
-            sid, domain_name = net.join_member(netbios_name, machinepass=params["machinepass"])
+            sid, domain_name = net.join_member(netbios_name, **join_kwargs)
         except Exception as exc:
             raise logic.SambaJoinMemberError(f"joining the domain failed: {to_native(exc)}") from exc
 
@@ -301,6 +330,7 @@ def main():
         "bind_username": {"type": "str", "required": True},
         "bind_password": {"type": "str", "no_log": True},
         "machinepass": {"type": "str", "no_log": True},
+        "computer_ou": {"type": "str"},
         "use_kerberos": {"type": "str", "default": "required", "choices": KERBEROS_CHOICES},
         "force": {"type": "bool", "default": False},
         "state": {"type": "str", "default": "present", "choices": ["present"]},

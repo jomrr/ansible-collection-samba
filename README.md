@@ -30,6 +30,8 @@ setup).
 | `samba_user_info` | Query users | n/a (read) | n/a |
 | `samba_group` | Create, modify and remove groups (scope, category, members, gid) | yes | yes |
 | `samba_group_info` | Query groups | n/a (read) | n/a |
+| `samba_computer` | Move computer accounts into a container; domain controllers excluded | yes | yes |
+| `samba_computer_info` | Query computer accounts | n/a (read) | n/a |
 | `samba_ou` | Create, modify and remove organizational units | yes | yes |
 | `samba_ou_info` | Query organizational units | n/a (read) | n/a |
 | `samba_dns_record` | Manage DNS records (A, AAAA, CNAME, PTR, NS, MX, SRV, TXT) | yes | yes |

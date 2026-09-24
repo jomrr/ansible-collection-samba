@@ -218,6 +218,17 @@
       no_log: true
       when: "'dc' in group_names"
 
+    - name: Prepare | DC | Create the OU the forced re-join creates the member's account in
+      # verify.yml re-joins with computer_ou pointing here; the OU must exist.
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - ou
+          - add
+          - OU=Servers
+      changed_when: true
+      when: "'dc' in group_names"
+
     # --- member role: reach the DC and become an AD member (fixture), no join ---
     - name: Prepare | Member | Resolve the DC's IP over the shared podman network
       ansible.builtin.command:

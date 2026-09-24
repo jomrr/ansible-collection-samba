@@ -341,6 +341,35 @@
           - _gplaced.groups[0].dn | lower is search('ou=loc_a')
           - _gmover.groups[0].dn | lower is search('ou=loc_b')
 
+    - name: Verify | Read all computer accounts
+      jomrr.samba.samba_computer_info:
+      register: _computers
+
+    - name: Verify | Read the computer moved into an OU
+      jomrr.samba.samba_computer_info:
+        name: WS01
+      register: _ws01
+
+    - name: Verify | Read the computer moved back to the default container (name with $)
+      jomrr.samba.samba_computer_info:
+        name: ws02$
+      register: _ws02
+
+    - name: Verify | The computers sit where samba_computer put them, the DC is not listed
+      vars:
+        _computer_names: "{{ _computers.computers | map(attribute='name') | map('upper') | list }}"
+      ansible.builtin.assert:
+        that:
+          - _ws01.computers | length == 1
+          - _ws01.computers[0].dn | lower is search('^cn=ws01,ou=loc_a,')
+          # samba-tool computer add sets no dNSHostName without --ip-address.
+          - _ws01.computers[0].dns_host_name is none
+          - _ws02.computers | length == 1
+          - _ws02.computers[0].dn | lower is search('^cn=ws02,cn=computers,')
+          - "'WS01' in _computer_names"
+          - "'WS02' in _computer_names"
+          - (inventory_hostname | upper) not in _computer_names
+
     - name: Verify | Read the group whose description was removed
       jomrr.samba.samba_group_info:
         name: gclear

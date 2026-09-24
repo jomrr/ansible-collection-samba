@@ -4,8 +4,8 @@
 
 The lazy ``ldb`` import, the LDB message value helpers, the safe DN construction
 and the existence probes live here, plus :class:`SambaObjectIO`, the common
-modify/delete/move base of the movable, deletable directory objects (users and
-groups). The object-specific attribute mappings stay in ``samba_<object>_io``.
+modify/delete/move base of the movable directory objects (users, groups and
+computers). The object-specific attribute mappings stay in ``samba_<object>_io``.
 
 The ``samba``/``ldb`` bindings are imported lazily (via importlib inside a
 function), so importing this module never requires them - that keeps the static
@@ -76,6 +76,12 @@ def default_users_dn(samdb):
     return samdb.get_wellknown_dn(samdb.get_default_basedn(), dsdb.DS_GUID_USERS_CONTAINER)
 
 
+def default_computers_dn(samdb):
+    """Return the well-known Computers container DN (CN=Computers,<domaindn>, or its redirection)."""
+    dsdb = importlib.import_module("samba.dsdb")
+    return samdb.get_wellknown_dn(samdb.get_default_basedn(), dsdb.DS_GUID_COMPUTERS_CONTAINER)
+
+
 def same_parent(samdb, object_dn, parent_dn):
     """True if ``object_dn``'s parent equals ``parent_dn`` (normalized DN compare)."""
     return parse_dn(samdb, object_dn).parent() == parent_dn
@@ -125,9 +131,11 @@ class SambaObjectIO:
     """Common LDB write operations of the movable, deletable object modules.
 
     A subclass sets ``error_cls`` (its user-facing error) and ``noun`` (the
-    object kind named in messages) and adds the object-specific reads and
-    writes. Concurrent-change races (the object vanished, the target exists)
-    surface as clear errors or idempotent no-ops, never as tracebacks.
+    object kind named in messages), overrides :meth:`_default_container_dn`
+    if its objects do not default to the Users container, and adds the
+    object-specific reads and writes. Concurrent-change races (the object
+    vanished, the target exists) surface as clear errors or idempotent no-ops,
+    never as tracebacks.
     """
 
     error_cls = Exception
@@ -135,9 +143,14 @@ class SambaObjectIO:
 
     def __init__(self, samdb):
         self.samdb = samdb
-        #: The default Users container, read once per run (a wellKnownObjects
-        #: lookup on the DC) and shared by needs_move and parent_exists.
+        #: The default container of the object kind, read once per run (a
+        #: wellKnownObjects lookup on the DC) and shared by needs_move and
+        #: parent_exists.
         self._default_container = None
+
+    def _default_container_dn(self):
+        """Return the default container of the object kind: the Users container."""
+        return default_users_dn(self.samdb)
 
     def rfc2307_provisioned(self):
         """True if the domain was provisioned with C(--use-rfc2307)."""
@@ -169,7 +182,7 @@ class SambaObjectIO:
             raise
 
     def _desired_parent(self, path):
-        """Return the desired parent DN (path, or the default Users container).
+        """Return the desired parent DN (path, or the default container of the object kind).
 
         The default container is looked up once and reused, so callers must not
         modify it; a path is parsed afresh each time (``container_below_domain``
@@ -177,7 +190,7 @@ class SambaObjectIO:
         """
         if path is None:
             if self._default_container is None:
-                self._default_container = default_users_dn(self.samdb)
+                self._default_container = self._default_container_dn()
             return self._default_container
         try:
             return parse_dn(self.samdb, path)
