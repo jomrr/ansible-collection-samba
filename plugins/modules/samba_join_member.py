@@ -311,12 +311,14 @@ class SambaJoinMemberIO:
 
         net = net_s3.Net(creds, s3_lp, server=params["server"])
         try:
-            sid, domain_name = net.join_member(netbios_name, **join_kwargs)
+            sid, _dns_domain = net.join_member(netbios_name, **join_kwargs)
         except Exception as exc:
             raise logic.SambaJoinMemberError(f"joining the domain failed: {to_native(exc)}") from exc
 
+        # join_member() returns the DNS domain as its second value, not the
+        # NetBIOS workgroup; the workgroup comes from smb.conf, as in read_state.
         return {
-            "workgroup": to_native(domain_name),
+            "workgroup": load_parm.get("workgroup"),
             "netbios_name": to_native(netbios_name),
             "domainsid": to_native(sid),
         }

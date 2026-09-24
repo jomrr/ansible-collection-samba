@@ -483,6 +483,25 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
   accounts (DC and RODC) are never matched, so a DC is never moved out of
   `OU=Domain Controllers`. `samba_computer_info` queries the same accounts.
 
+### libnet output on stdout (samba_join_member)
+
+- **Not captured (decided 2026-09-25).** libnet writes errors of the join, such
+  as a failed DNS update, straight to C stdout: `d_printf(_("DNS Update for %s
+  failed: %s\n"), ...)` in `net_update_dns_internal()` (samba
+  `source3/utils/net_ads_join_dns.c`); its caller `net_ads_join_dns_updates()`
+  adds a summary on stderr. Ansible filters the non-JSON lines around the
+  module result and shows them as a warning ("Module invocation had junk after
+  the JSON data: DNS Update for ... failed: ..."). That warning is the intended
+  signal, so the module does not capture the output. Ansible drops the stderr of
+  a successful module.
+- **Verified live (samba 4.24.6).** The forced re-join after the account was
+  deleted on the DC (join_member verify) was recorded on the member stream by
+  stream: the DNS line is in the module process's stdout, after the JSON,
+  because it waits in the C stdio buffer until the process exits; stderr holds
+  `DNS update failed: NT_STATUS_UNSUCCESSFUL`. The podman connection keeps both
+  streams apart. `Transcript` in `samba_local` swaps only Python's
+  `sys.stdout`, so it would not catch this output either.
+
 ### Open design points
 
 - **check_mode:** joining cannot be dry-run; check_mode reads the join state

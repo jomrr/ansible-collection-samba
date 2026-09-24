@@ -84,6 +84,8 @@
         that:
           - _forced is changed
           - _forced.joined is true
+          # After a join, too, the workgroup is the NetBIOS one from smb.conf.
+          - _forced.domain.workgroup == samba_domain
 
     - name: Verify | Read the member's computer account on the DC
       ansible.builtin.command:

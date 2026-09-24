@@ -198,7 +198,8 @@ class FakeNet:
 
     def join_member(self, netbios_name, **kwargs):
         self.captured = {"netbios_name": netbios_name, **kwargs}
-        return ("S-1-5-21-7", "SAMDOM")
+        # Like the binding: the second value is the DNS domain, not the workgroup.
+        return ("S-1-5-21-7", "samdom.example.com")
 
 
 class FakeNetS3Mod:
