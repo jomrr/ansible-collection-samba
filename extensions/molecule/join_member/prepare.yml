@@ -40,11 +40,13 @@
       Suse: [samba-ad-dc, samba-tool, samba-dsdb-modules, samba-client, samba-python3, python3-cryptography, krb5-client, krb5-server, samba-winbind]
     # Member side: an AD member with winbind + the nss_winbind module + the net
     # binary + the python3-samba bindings the module's net_s3 join needs. NOT the
-    # AD DC daemon.
+    # AD DC daemon. `samba` makes the member a file server for the samba_ntacl
+    # share: smbd's VFS modules (acl_xattr) that reading and writing NT ACLs
+    # through the share load.
     _member_packages:
-      Debian: [samba-common-bin, winbind, libnss-winbind, libpam-winbind, python3-samba, smbclient, krb5-user, procps]
-      RedHat: [samba-winbind, samba-winbind-clients, samba-client, samba-common-tools, python3-samba, krb5-workstation, procps-ng]
-      Suse: [samba-winbind, samba-client, samba-python3, krb5-client, procps]
+      Debian: [samba-common-bin, winbind, libnss-winbind, libpam-winbind, python3-samba, samba, smbclient, krb5-user, procps]
+      RedHat: [samba-winbind, samba-winbind-clients, samba-client, samba-common-tools, python3-samba, samba, krb5-workstation, procps-ng]
+      Suse: [samba-winbind, samba-client, samba-python3, samba, krb5-client, procps]
     target_dc_fqdn: "{{ target_dc | default('') }}.{{ samba_realm | lower }}"
   tasks:
     # --- common: bootstrap and per-role packages ---
@@ -218,6 +220,37 @@
       no_log: true
       when: "'dc' in group_names"
 
+    - name: Prepare | DC | Seed the samba_ntacl test groups with FIXED gidNumbers
+      # Every domain trustee of an NT ACL needs a unix id under idmap_ad.
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - group
+          - add
+          - "{{ item.name }}"
+          - "--nis-domain={{ samba_domain | lower }}"
+          - "--gid-number={{ item.gid }}"
+      loop: "{{ samba_ntacl_groups }}"
+      changed_when: true
+      when: "'dc' in group_names"
+
+    - name: Prepare | DC | Seed the samba_ntacl test owner with a FIXED uidNumber
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - user
+          - add
+          - "{{ samba_ntacl_owner }}"
+          - "{{ samba_admin_password }}"
+          - "--nis-domain={{ samba_domain | lower }}"
+          - "--unix-home=/home/{{ samba_ntacl_owner }}"
+          - "--uid-number={{ samba_ntacl_owner_uid }}"
+          - "--login-shell=/bin/bash"
+          - "--gid-number={{ samba_rfc_user_gid }}"
+      changed_when: true
+      no_log: true
+      when: "'dc' in group_names"
+
     - name: Prepare | DC | Create the OU the forced re-join creates the member's account in
       # verify.yml re-joins with computer_ou pointing here; the OU must exist.
       ansible.builtin.command:
@@ -303,6 +336,18 @@
               winbind enum groups = yes
               template shell = /bin/bash
               template homedir = /home/%U
+
+          [projects]
+              path = {{ samba_ntacl_path }}
+              read only = no
+              vfs objects = acl_xattr
+      when: "'member' in group_names"
+
+    - name: Prepare | Member | Create the samba_ntacl test share directory
+      ansible.builtin.file:
+        path: "{{ samba_ntacl_path }}"
+        state: directory
+        mode: "0755"
       when: "'member' in group_names"
 
     - name: Prepare | Member | Check for an /etc nsswitch.conf

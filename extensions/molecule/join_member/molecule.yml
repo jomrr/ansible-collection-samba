@@ -33,6 +33,8 @@
 driver:
   name: podman
 
+# The members also get a tmpfs for the samba_ntacl test share: like
+# /var/lib/samba it takes the security.NTACL xattr the rootless overlay refuses.
 platforms:
   # --- pair: debian ---
   - name: mdc-deb
@@ -48,7 +50,7 @@ platforms:
     privileged: true
     network: jomrr-join-member
     groups: [member]
-    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755", "--tmpfs", "/srv/samba/shares:rw,size=64m,mode=0755"]
   # --- pair: fedora ---
   - name: mdc-fed
     image: docker.io/debian:stable
@@ -63,7 +65,7 @@ platforms:
     privileged: true
     network: jomrr-join-member
     groups: [member]
-    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755", "--tmpfs", "/srv/samba/shares:rw,size=64m,mode=0755"]
   # --- pair: opensuse ---
   - name: mdc-suse
     image: docker.io/debian:stable
@@ -78,7 +80,7 @@ platforms:
     privileged: true
     network: jomrr-join-member
     groups: [member]
-    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755", "--tmpfs", "/srv/samba/shares:rw,size=64m,mode=0755"]
   # --- pair: ubuntu ---
   - name: mdc-ubu
     image: docker.io/debian:stable
@@ -93,7 +95,7 @@ platforms:
     privileged: true
     network: jomrr-join-member
     groups: [member]
-    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755"]
+    extra_opts: ["--tmpfs", "/var/lib/samba:rw,size=1g,mode=0755", "--tmpfs", "/srv/samba/shares:rw,size=64m,mode=0755"]
 
 provisioner:
   name: ansible
@@ -112,6 +114,16 @@ provisioner:
         samba_rfc_user_gid: 10000
         samba_rfc_group: rfcgroup
         samba_rfc_gid: 10001
+        # The samba_ntacl test share on the member and its principals, seeded
+        # on the DC with FIXED unix ids (idmap_ad maps only those).
+        samba_ntacl_path: /srv/samba/shares/projects
+        samba_ntacl_owner: projects-owner
+        samba_ntacl_owner_uid: 10100
+        samba_ntacl_groups:
+          - {name: projects-admins, gid: 10101}
+          - {name: projects-write, gid: 10102}
+          - {name: engineering-write, gid: 10103}
+          - {name: finance-write, gid: 10104}
     host_vars:
       # Each pair shares a realm; the member additionally points at its DC.
       mdc-deb: {samba_realm: DEB.MEMBER.EXAMPLE.COM, samba_domain: DEB}

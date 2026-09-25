@@ -16,6 +16,27 @@
   vars:
     # Created on the DC in prepare.yml; the forced re-join creates the account here.
     _servers_ou: "OU=Servers,DC={{ samba_realm | lower | split('.') | join(',DC=') }}"
+    # samba_ntacl: the ACL of the test share root and its managed folders.
+    _ntacl_aces:
+      - {trustee: projects-admins, rights: full}
+      - {trustee: projects-write, rights: modify}
+      - {trustee: Authenticated Users, rights: read_execute, applies_to: this_folder}
+      - {trustee: CREATOR OWNER, rights: full, applies_to: subfolders_files_only}
+    _ntacl_folders:
+      Engineering:
+        aces:
+          - {trustee: engineering-write, rights: modify}
+      Finance/Reports:
+        protected: true
+        aces:
+          - {trustee: projects-admins, rights: full}
+          - {trustee: finance-write, rights: modify}
+    # Access masks and ACE flags as smbd stores them (decimal).
+    _full: 2032127
+    _modify: 1245631
+    _read_execute: 1179817
+    _read: 1179785
+    _copied: "{{ samba_ntacl_path }}/Engineering/copied.txt"
   tasks:
     # --- the module's contract (no daemon needed) ---
     - name: Verify | A second samba_join_member run is an idempotent no-op
@@ -188,3 +209,279 @@
         that:
           - _wb.rc == 0
           - _wb.stdout.split(':')[2] == samba_rfc_uid | string
+
+    # --- samba_ntacl: the member as a file server (winbind runs from here on) ---
+    - name: Verify | ntacl | Install a reader for the NT ACLs smbd sees (oracle)
+      # Independent of the module: reads each path through the share's VFS stack
+      # with samba.ntacls and prints owner, group, flags and ACEs as JSON.
+      ansible.builtin.copy:
+        dest: /root/ntacl_read.py
+        mode: "0644"
+        content: |
+          import json
+          import sys
+
+          from samba import param
+          from samba.auth_util import system_session_unix
+          from samba.ntacls import getntacl
+          from samba.samba3 import param as s3param
+
+          lp = param.LoadParm()
+          lp.load_default()
+          s3param.get_context().load(lp.configfile)
+          result = {}
+          for path in sys.argv[2:]:
+              sd = getntacl(lp, path, system_session_unix(), direct_db_access=False, service=sys.argv[1])
+              result[path] = {
+                  "owner": str(sd.owner_sid),
+                  "group": str(sd.group_sid),
+                  "type": sd.type,
+                  "aces": [[ace.type, ace.flags, ace.access_mask, str(ace.trustee)] for ace in sd.dacl.aces],
+              }
+          print(json.dumps(result))
+
+    - name: Verify | ntacl | Install a writer that gives an object an ACE of its own (fixture)
+      ansible.builtin.copy:
+        dest: /root/ntacl_own_ace.py
+        mode: "0644"
+        content: |
+          import sys
+
+          from samba import param
+          from samba.auth_util import system_session_unix
+          from samba.dcerpc import security
+          from samba.ntacls import getntacl, setntacl
+          from samba.samba3 import param as s3param
+
+          share, path, sid = sys.argv[1:4]
+          lp = param.LoadParm()
+          lp.load_default()
+          s3param.get_context().load(lp.configfile)
+          session = system_session_unix()
+          sd = getntacl(lp, path, session, direct_db_access=False, service=share)
+          ace = security.ace()
+          ace.type = security.SEC_ACE_TYPE_ACCESS_ALLOWED
+          ace.flags = 0
+          ace.access_mask = 0x00120089
+          ace.trustee = security.dom_sid(sid)
+          sd.dacl_add(ace, 0)
+          setntacl(lp, path, sd, security.SID_BUILTIN, session, use_ntvfs=False, service=share)
+
+    - name: Verify | ntacl | Look up the SIDs of the test principals (oracle)
+      ansible.builtin.command:
+        argv:
+          - wbinfo
+          - --name-to-sid
+          - "{{ item }}"
+      loop: "{{ samba_ntacl_groups | map(attribute='name') | list + [samba_ntacl_owner] }}"
+      register: _ntacl_sids
+      changed_when: false
+
+    - name: Verify | ntacl | Map the principals to their SIDs
+      ansible.builtin.set_fact:
+        _sid: "{{ dict(_ntacl_sids.results | map(attribute='item') | zip(_ntacl_sids.results | map(attribute='stdout') | map('split') | map('first'))) }}"
+
+    - name: Verify | ntacl | First run sets the root, creates and sets the managed folders
+      jomrr.samba.samba_ntacl:
+        share: projects
+        owner: "{{ samba_ntacl_owner }}"
+        group: projects-admins
+        aces: "{{ _ntacl_aces }}"
+        folders: "{{ _ntacl_folders }}"
+      register: _ntacl_first
+
+    - name: Verify | ntacl | The first run reports the managed paths and the intermediate folder
+      ansible.builtin.assert:
+        that:
+          - _ntacl_first is changed
+          - _ntacl_first.changed_managed == ['.', 'Engineering', 'Finance/Reports']
+          - _ntacl_first.changed_other == 1
+
+    - name: Verify | ntacl | A second run is an idempotent no-op
+      jomrr.samba.samba_ntacl:
+        share: projects
+        owner: "{{ samba_ntacl_owner }}"
+        group: projects-admins
+        aces: "{{ _ntacl_aces }}"
+        folders: "{{ _ntacl_folders }}"
+      register: _ntacl_again
+
+    - name: Verify | ntacl | The second run changed nothing
+      ansible.builtin.assert:
+        that:
+          - _ntacl_again is not changed
+
+    - name: Verify | ntacl | Read the NT ACLs of the root and the managed folders
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /root/ntacl_read.py
+          - projects
+          - "{{ samba_ntacl_path }}"
+          - "{{ samba_ntacl_path }}/Engineering"
+          - "{{ samba_ntacl_path }}/Finance/Reports"
+      register: _ntacl_read
+      changed_when: false
+
+    - name: Verify | ntacl | Read the unix owner of the share root
+      ansible.builtin.stat:
+        path: "{{ samba_ntacl_path }}"
+      register: _ntacl_root_stat
+
+    - name: Verify | ntacl | Root, managed folders, owner and group are stored as specified
+      vars:
+        _acl: "{{ _ntacl_read.stdout | from_json }}"
+        _root: "{{ _acl[samba_ntacl_path] }}"
+        _eng: "{{ _acl[samba_ntacl_path ~ '/Engineering'] }}"
+        _reports: "{{ _acl[samba_ntacl_path ~ '/Finance/Reports'] }}"
+        _owner: "{{ _sid[samba_ntacl_owner] }}"
+      ansible.builtin.assert:
+        that:
+          - _root.owner == _owner
+          - _root.group == _sid['projects-admins']
+          # DACL_PROTECTED (0x1000) and DACL_AUTO_INHERITED (0x400)
+          - (_root.type | int) // 4096 % 2 == 1
+          - (_root.type | int) // 1024 % 2 == 1
+          - >-
+            _root.aces == [[0, 3, _full, _sid['projects-admins']], [0, 3, _modify, _sid['projects-write']],
+            [0, 0, _read_execute, 'S-1-5-11'], [0, 11, _full, 'S-1-3-0']]
+          # Own ACE, then what smbd would inherit: CREATOR OWNER becomes the owner
+          # plus an inherit-only CREATOR OWNER ACE; the this_folder ACE stays behind.
+          - >-
+            _eng.aces == [[0, 3, _modify, _sid['engineering-write']], [0, 19, _full, _sid['projects-admins']],
+            [0, 19, _modify, _sid['projects-write']], [0, 16, _full, _owner], [0, 27, _full, 'S-1-3-0']]
+          - (_reports.type | int) // 4096 % 2 == 1
+          - _reports.aces == [[0, 3, _full, _sid['projects-admins']], [0, 3, _modify, _sid['finance-write']]]
+          - _ntacl_root_stat.stat.uid == samba_ntacl_owner_uid
+          - _ntacl_root_stat.stat.gid == samba_ntacl_groups[0].gid
+
+    - name: Verify | ntacl | A file copied onto the share over SSH has no NT ACL
+      ansible.builtin.copy:
+        dest: "{{ _copied }}"
+        content: copied over ssh
+        mode: "0644"
+
+    - name: Verify | ntacl | propagate=inherit gives it the inherited ACEs
+      jomrr.samba.samba_ntacl:
+        share: projects
+        owner: "{{ samba_ntacl_owner }}"
+        group: projects-admins
+        aces: "{{ _ntacl_aces }}"
+        folders: "{{ _ntacl_folders }}"
+      register: _ntacl_copied
+
+    - name: Verify | ntacl | Read the NT ACL of the copied file
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /root/ntacl_read.py
+          - projects
+          - "{{ _copied }}"
+      register: _ntacl_copied_read
+      changed_when: false
+
+    - name: Verify | ntacl | Only the copied file changed; it inherits, the copying user stays its owner
+      vars:
+        _file: "{{ (_ntacl_copied_read.stdout | from_json)[_copied] }}"
+      ansible.builtin.assert:
+        that:
+          - _ntacl_copied.changed_managed == []
+          - _ntacl_copied.changed_other == 1
+          - _file.owner != _sid[samba_ntacl_owner]
+          - >-
+            _file.aces == [[0, 16, _modify, _sid['engineering-write']], [0, 16, _full, _sid['projects-admins']],
+            [0, 16, _modify, _sid['projects-write']], [0, 16, _full, _file.owner]]
+
+    - name: Verify | ntacl | propagate_owner=parent passes the owner of the managed folder on
+      jomrr.samba.samba_ntacl:
+        share: projects
+        owner: "{{ samba_ntacl_owner }}"
+        group: projects-admins
+        propagate_owner: parent
+        aces: "{{ _ntacl_aces }}"
+        folders: "{{ _ntacl_folders }}"
+      register: _ntacl_owner
+
+    - name: Verify | ntacl | Read the unix owner of the copied file
+      ansible.builtin.stat:
+        path: "{{ _copied }}"
+      register: _ntacl_copied_stat
+
+    - name: Verify | ntacl | The copied file now belongs to the owner of Engineering
+      ansible.builtin.assert:
+        that:
+          - _ntacl_owner.changed_other == 1
+          - _ntacl_copied_stat.stat.uid == samba_ntacl_owner_uid
+
+    - name: Verify | ntacl | Give the copied file an ACE of its own (fixture)
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /root/ntacl_own_ace.py
+          - projects
+          - "{{ _copied }}"
+          - "{{ _sid['projects-write'] }}"
+      changed_when: true
+
+    - name: Verify | ntacl | propagate=inherit keeps an ACE of its own
+      jomrr.samba.samba_ntacl:
+        share: projects
+        owner: "{{ samba_ntacl_owner }}"
+        group: projects-admins
+        propagate_owner: parent
+        aces: "{{ _ntacl_aces }}"
+        folders: "{{ _ntacl_folders }}"
+      register: _ntacl_kept
+
+    - name: Verify | ntacl | propagate=replace removes it
+      jomrr.samba.samba_ntacl:
+        share: projects
+        owner: "{{ samba_ntacl_owner }}"
+        group: projects-admins
+        propagate: replace
+        propagate_owner: parent
+        aces: "{{ _ntacl_aces }}"
+        folders: "{{ _ntacl_folders }}"
+      register: _ntacl_replaced
+
+    - name: Verify | ntacl | Read the NT ACL of the copied file after replace
+      ansible.builtin.command:
+        argv:
+          - python3
+          - /root/ntacl_read.py
+          - projects
+          - "{{ _copied }}"
+      register: _ntacl_replaced_read
+      changed_when: false
+
+    - name: Verify | ntacl | inherit kept the own ACE, replace left only the inherited ones
+      vars:
+        _file: "{{ (_ntacl_replaced_read.stdout | from_json)[_copied] }}"
+      ansible.builtin.assert:
+        that:
+          - _ntacl_kept is not changed
+          - _ntacl_replaced.changed_other == 1
+          - _file.aces | map('first') | list == [0, 0, 0, 0]
+          - _file.aces | map(attribute=1) | list == [16, 16, 16, 16]
+
+    - name: Verify | ntacl | Check mode with a new managed folder
+      jomrr.samba.samba_ntacl:
+        share: projects
+        owner: "{{ samba_ntacl_owner }}"
+        group: projects-admins
+        aces: "{{ _ntacl_aces }}"
+        folders: "{{ _ntacl_folders | combine({'Archive': {}}) }}"
+      check_mode: true
+      register: _ntacl_check
+
+    - name: Verify | ntacl | Look for the folder check mode must not create
+      ansible.builtin.stat:
+        path: "{{ samba_ntacl_path }}/Archive"
+      register: _ntacl_archive
+
+    - name: Verify | ntacl | Check mode reported the folder without creating it
+      ansible.builtin.assert:
+        that:
+          - _ntacl_check is changed
+          - _ntacl_check.changed_managed == ['Archive']
+          - not _ntacl_archive.stat.exists

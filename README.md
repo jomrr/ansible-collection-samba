@@ -56,6 +56,7 @@ binary.
 | `samba_join_member` | Join an existing domain as a Samba member server (winbind) | yes (binary) | yes |
 | `samba_join_sssd` | Join an existing domain for SSSD (writes a Kerberos keytab) | yes (binary) | yes |
 | `samba_schema_extension` | Extend the schema on the schema master (LAPS, OpenSSH public keys, LDAP compat) | yes | yes |
+| `samba_ntacl` | Set the NT ACLs and owners of a share root and managed folders on the file server, pass inheritance on | yes | yes |
 
 The three join modules are split **by join mechanism and the artifact each
 writes**, not by the host's intended purpose:

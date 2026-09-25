@@ -556,6 +556,56 @@ switch (see "the cut" above).
 
 ---
 
+## NT ACLs (samba_ntacl)
+
+### Context
+
+A file server share needs an authoritative NT ACL and owner on its root and on
+managed folders, missing folders created, and inheritance (and optionally
+ownership) passed on to everything else, including files copied onto the share
+over SSH, which have no NT ACL.
+
+### Decisions (2026-09-25)
+
+- **Local module, VFS path.** `samba_ntacl` runs on the file server as root,
+  not in the action group. It reads and writes with `samba.ntacls`
+  (`getntacl`/`setntacl`, `use_ntvfs=False`, `service=<share>`), so the ACL
+  goes through the share's VFS stack exactly as smbd stores it; owner and
+  group set this way also set uid/gid, and smbd derives the rwx bits from the
+  DACL. The share's `vfs objects` must include `acl_xattr`: only then is "no
+  NT ACL" detectable (`getntacl(direct_db_access=True)` fails with ENODATA)
+  instead of a DACL synthesized from the POSIX mode. `setntacl` always writes
+  OWNER|GROUP|DACL|SACL, so the current SACL is written back unchanged (the
+  SACL is not managed).
+- **Inheritance like smbd.** The inherited ACEs are a port of samba's
+  `se_create_child_secdesc` (libcli/security/secdesc.c), the function smbd
+  uses for objects created over SMB. It marks ACEs INHERITED only when the
+  parent carries `SEC_DESC_DACL_AUTO_INHERITED`, so every ACL is written with
+  that flag; otherwise objects created over SMB would look different on every
+  run. Explicit ACEs are written in canonical order (deny before allow), the
+  inherited ones follow in the order of the port.
+- **Names over LSA.** Trustee, owner and group names (well-known principals
+  included) are resolved with `LookupNames3` on a DC found by `finddc`, with
+  the file server's machine account - bindings only.
+- **No idmap pre-check.** Whether owner, group and domain trustees map to a
+  uid/gid is left to smbd, which refuses the write; the module reports path
+  and NTSTATUS. Verified in the source: `passdb.PDB.sid_to_id` maps only the
+  local SAM, Unix and BUILTIN SIDs, never AD SIDs on a member, and there is no
+  Python binding for winbind's idmap. Check mode does not see this case; with
+  `idmap_ad` every domain trustee needs a uidNumber/gidNumber.
+- **Propagation.** `propagate`: none leaves the other objects alone; inherit
+  keeps their own ACEs (only a stored NT ACL has any) and recomputes the
+  inherited part, a protected object keeps its ACL; replace leaves only the
+  inherited ACEs and removes the protection (Windows' "replace all child
+  permission entries"). `propagate_owner=parent` gives them the owner and
+  group of the nearest managed folder. Symlinks are not followed and other
+  file systems are not entered.
+- **SELinux.** Created folders get the default context of their path through
+  `AnsibleModule.set_default_selinux_context` (matchpathcon, what `restorecon`
+  applies), a no-op without SELinux.
+
+---
+
 ## Password policy modules (samba_password_policy / samba_password_settings)
 
 ### Context
