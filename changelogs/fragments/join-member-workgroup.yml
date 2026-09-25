@@ -1,4 +1,0 @@
----
-bugfixes:
-  - samba_join_member - C(domain.workgroup) after a join is the NetBIOS workgroup from smb.conf, as documented
-    and as a run without a join returns; it was the DNS domain name the join binding reports.

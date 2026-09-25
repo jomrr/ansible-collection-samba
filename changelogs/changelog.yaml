@@ -306,3 +306,36 @@ releases:
     fragments:
       - dns-zone-aging.yml
     release_date: '2026-09-23'
+  2.2.0:
+    changes:
+      bugfixes:
+        - Documentation rendering - replace the remaining C(M()) module-reference
+          markup macros with C(C()) (the modules are already in C(seealso)) in samba_group
+          and samba_group_info. As in 1.0.1, the Galaxy/Automation Hub documentation
+          renderer cannot parse the macro; only the rendered doc pages were affected.
+        - samba_join_member - C(domain.workgroup) after a join is the NetBIOS workgroup
+          from smb.conf, as documented and as a run without a join returns; it was
+          the DNS domain name the join binding reports.
+      minor_changes:
+        - New module samba_computer to keep an existing computer account in a container
+          or OU (a move, idempotent, with check mode); the default is the domain's
+          Computers container, domain controller accounts are never matched, and accounts
+          are never created or deleted.
+        - New module samba_computer_info to query computer accounts, the same accounts
+          samba_computer manages (domain controllers and managed service accounts
+          excluded).
+        - samba_join_member - new option C(computer_ou) to create the machine account
+          in a given OU, as samba_join_sssd offers; an existing account is not moved.
+    fragments:
+      - computer-modules.yml
+      - doc-render-m-macro-group.yml
+      - join-member-computer-ou.yml
+      - join-member-workgroup.yml
+    modules:
+      - description: Keep a computer account in a container of a Samba AD DC
+        name: samba_computer
+        namespace: ''
+      - description: Query computer accounts from a Samba AD DC
+        name: samba_computer_info
+        namespace: ''
+    release_date: '2026-09-25'

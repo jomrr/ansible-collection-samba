@@ -1,8 +1,30 @@
 =============================
-jomrr.samba 2.1 Release Notes
+jomrr.samba 2.2 Release Notes
 =============================
 
 .. contents:: Topics
+
+v2.2.0
+======
+
+Minor Changes
+-------------
+
+- New module samba_computer to keep an existing computer account in a container or OU (a move, idempotent, with check mode); the default is the domain's Computers container, domain controller accounts are never matched, and accounts are never created or deleted.
+- New module samba_computer_info to query computer accounts, the same accounts samba_computer manages (domain controllers and managed service accounts excluded).
+- samba_join_member - new option C(computer_ou) to create the machine account in a given OU, as samba_join_sssd offers; an existing account is not moved.
+
+Bugfixes
+--------
+
+- Documentation rendering - replace the remaining C(M()) module-reference markup macros with C(C()) (the modules are already in C(seealso)) in samba_group and samba_group_info. As in 1.0.1, the Galaxy/Automation Hub documentation renderer cannot parse the macro; only the rendered doc pages were affected.
+- samba_join_member - C(domain.workgroup) after a join is the NetBIOS workgroup from smb.conf, as documented and as a run without a join returns; it was the DNS domain name the join binding reports.
+
+New Modules
+-----------
+
+- samba_computer - Keep a computer account in a container of a Samba AD DC
+- samba_computer_info - Query computer accounts from a Samba AD DC
 
 v2.1.0
 ======

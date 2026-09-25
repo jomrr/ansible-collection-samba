@@ -11,6 +11,16 @@ plugins:
   inventory: {}
   lookup: {}
   module:
+    samba_computer:
+      description: Keep a computer account in a container of a Samba AD DC
+      name: samba_computer
+      namespace: ''
+      version_added: 2.2.0
+    samba_computer_info:
+      description: Query computer accounts from a Samba AD DC
+      name: samba_computer_info
+      namespace: ''
+      version_added: 2.2.0
     samba_dns_record:
       description: Manage DNS records in a Samba AD DC
       name: samba_dns_record
@@ -102,4 +112,4 @@ plugins:
   strategy: {}
   test: {}
   vars: {}
-version: 2.1.0
+version: 2.2.0
