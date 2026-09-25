@@ -1,0 +1,7 @@
+---
+bugfixes:
+  - Documentation rendering - replace the remaining C(M()) module-reference markup macros with C(C()) (the modules
+    are already in C(seealso)) in samba_group and samba_group_info. As in 1.0.1, the Galaxy/Automation Hub
+    documentation renderer cannot parse the macro; only the rendered doc pages were affected.
+trivial:
+  - C(make lint) fails on C(M()) in the module documentation and doc fragments.

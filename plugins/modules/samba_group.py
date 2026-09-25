@@ -72,7 +72,7 @@ options:
         groups or computers) or by its distinguished name (any value that
         contains C(=), which a C(sAMAccountName) cannot). Names are resolved
         to DNs; DNs are checked to exist.
-      - M(jomrr.samba.samba_group_info) returns members as distinguished
+      - C(jomrr.samba.samba_group_info) returns members as distinguished
         names, so its output can be fed back here unchanged.
       - If omitted, membership is not managed at all.
       - See I(members_purge) for additive versus authoritative behaviour.

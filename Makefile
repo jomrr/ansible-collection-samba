@@ -17,14 +17,18 @@ MYPY := uvx --with 'ansible-core==2.20.*' mypy@2.3.1
 
 .DEFAULT_GOAL := help
 
-.PHONY: help lint sanity units molecule molecule-provision molecule-join-dc molecule-join-member molecule-join-sssd build promote release release-dry galaxy docs docs-clean clean
+.PHONY: help sanity units molecule molecule-provision molecule-join-dc molecule-join-member molecule-join-sssd build promote release release-dry galaxy docs docs-clean clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
 
-lint: ## Run ansible-lint (profile production)
+# M() module references break the Galaxy documentation renderer (fixed in
+# 1.0.1); module references are C(<fqcn>) plus a seealso entry.
+.PHONY: lint
+lint: ## Run ansible-lint (profile production) and reject M() in the module docs
 	ansible-lint
+	! grep -rnE '\bM\(' plugins/modules plugins/doc_fragments
 
 sanity: ## Run ansible-test sanity (Podman, py3.12)
 	$(AT) sanity --docker --python $(PYTHON_VERSION)

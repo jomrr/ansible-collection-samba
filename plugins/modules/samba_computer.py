@@ -49,6 +49,8 @@ seealso:
     description: Query computer accounts from a Samba AD DC.
   - module: jomrr.samba.samba_join_member
     description: Join a host as a member server, creating its account in an OU.
+  - module: jomrr.samba.samba_join_sssd
+    description: Join a host to an existing domain via adcli for SSSD.
 notes:
   - The DC is reached over the network, so the module does not have to run on a
     domain controller. Any host with the C(samba) bindings that can reach
