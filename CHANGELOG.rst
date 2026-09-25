@@ -1,8 +1,21 @@
 =============================
-jomrr.samba 2.2 Release Notes
+jomrr.samba 2.3 Release Notes
 =============================
 
 .. contents:: Topics
+
+v2.3.0
+======
+
+Minor Changes
+-------------
+
+- New module samba_ntacl to set the NT ACL, owner and group of a share root and of managed folders (created if missing) through the share's VFS stack on the file server, and to pass inheritance and optionally ownership on to the other files and folders (C(propagate), C(propagate_owner)).
+
+New Modules
+-----------
+
+- samba_ntacl - Manage the NT ACLs of a Samba share
 
 v2.2.0
 ======

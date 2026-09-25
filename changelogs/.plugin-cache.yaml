@@ -66,6 +66,11 @@ plugins:
       name: samba_join_sssd
       namespace: ''
       version_added: 0.1.0
+    samba_ntacl:
+      description: Manage the NT ACLs of a Samba share
+      name: samba_ntacl
+      namespace: ''
+      version_added: 2.3.0
     samba_ou:
       description: Manage organizational units in a Samba AD DC
       name: samba_ou
@@ -112,4 +117,4 @@ plugins:
   strategy: {}
   test: {}
   vars: {}
-version: 2.2.0
+version: 2.3.0

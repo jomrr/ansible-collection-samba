@@ -339,3 +339,17 @@ releases:
         name: samba_computer_info
         namespace: ''
     release_date: '2026-09-25'
+  2.3.0:
+    changes:
+      minor_changes:
+        - New module samba_ntacl to set the NT ACL, owner and group of a share root
+          and of managed folders (created if missing) through the share's VFS stack
+          on the file server, and to pass inheritance and optionally ownership on
+          to the other files and folders (C(propagate), C(propagate_owner)).
+    fragments:
+      - samba-ntacl-module.yml
+    modules:
+      - description: Manage the NT ACLs of a Samba share
+        name: samba_ntacl
+        namespace: ''
+    release_date: '2026-09-25'
