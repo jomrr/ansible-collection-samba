@@ -4,6 +4,14 @@ jomrr.samba 2.3 Release Notes
 
 .. contents:: Topics
 
+v2.3.1
+======
+
+Bugfixes
+--------
+
+- samba_provision - set the sysvol NT ACLs as C(samba-tool domain provision) does; samba's C(provision()) skips them by default. A DC provisioned with an earlier version of this module needs a one-time C(samba-tool ntacl sysvolreset).
+
 v2.3.0
 ======
 
