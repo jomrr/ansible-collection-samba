@@ -97,6 +97,7 @@ def test_io_provision_maps_parameters(monkeypatch):
     assert cap["serverrole"] == "dc"
     assert cap["dom_for_fun_level"] == 7          # "2016" -> 7 via string_to_level
     assert cap["use_rfc2307"] is True
+    assert cap["skip_sysvolacl"] is False          # sysvol NT ACLs set, as samba-tool does
     # Only the non-secret identity is returned; no password.
     assert out == {"domaindn": "DC=samdom,DC=example,DC=com", "domainsid": "S-1-5-21-1-2-3"}
     assert "S3cret-Passw0rd!" not in repr(out)

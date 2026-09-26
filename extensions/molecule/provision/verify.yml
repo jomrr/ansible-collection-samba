@@ -80,6 +80,16 @@
         that:
           - "'STRUCT_OK' in _struct.stdout"
 
+    - name: Verify | The sysvol NT ACLs are the ones provision sets (no daemon)
+      # Fails on any difference between the sysvol/netlogon ACLs and the ACLs
+      # provision derives from the GPO security descriptors.
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - ntacl
+          - sysvolcheck
+      changed_when: false
+
     # --- idempotency and check mode (still daemon-less) ---
     - name: Verify | A second samba_provision run is an idempotent no-op
       jomrr.samba.samba_provision:

@@ -258,6 +258,8 @@ class SambaProvisionIO:
                     serverrole=params["server_role"],
                     dom_for_fun_level=functional_level.string_to_level(params["function_level"]),
                     use_rfc2307=params["use_rfc2307"],
+                    # provision() defaults to True; samba-tool passes False.
+                    skip_sysvolacl=False,
                     lp=load_parm,
                 )
         except Exception as exc:
