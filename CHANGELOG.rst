@@ -1,8 +1,22 @@
 =============================
-jomrr.samba 2.3 Release Notes
+jomrr.samba 2.4 Release Notes
 =============================
 
 .. contents:: Topics
+
+v2.4.0
+======
+
+Minor Changes
+-------------
+
+- samba_user - C(home_directory) and C(home_drive) manage a user's home folder (C(homeDirectory)) and the drive it is connected as at logon (C(homeDrive)).
+- samba_user_info - each user reports its C(home_directory) and C(home_drive).
+
+Deprecated Features
+-------------------
+
+- samba_join_sssd - deprecated, will be removed in 3.0.0; the SSSD join moves into a planned SSSD client role together with the SSSD configuration.
 
 v2.3.1
 ======

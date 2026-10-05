@@ -1,4 +1,0 @@
----
-deprecated_features:
-  - samba_join_sssd - deprecated, will be removed in 3.0.0; the SSSD join moves into a planned SSSD client role together
-    with the SSSD configuration.
