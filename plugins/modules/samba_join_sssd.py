@@ -8,6 +8,14 @@ DOCUMENTATION = r"""
 module: samba_join_sssd
 short_description: Join a host to an existing domain via adcli for SSSD
 version_added: 0.1.0
+deprecated:
+  removed_in: 3.0.0
+  why: The SSSD join moves into a planned SSSD client role, which also sets up
+    sssd.conf, nsswitch/PAM and the SSSD daemon that this module leaves to the
+    caller.
+  alternative: The planned SSSD client role of this collection; until it is
+    available, this module keeps working unchanged.
+  removed_from_collection: jomrr.samba
 description:
   - Join the local host to an existing Active Directory domain using C(adcli),
     which creates the machine account and writes a Kerberos B(keytab) (by

@@ -18,3 +18,9 @@ action_groups:
     - samba_dns_zone_info
     - samba_password_policy
     - samba_password_settings
+plugin_routing:
+  modules:
+    samba_join_sssd:
+      deprecation:
+        removal_version: 3.0.0
+        warning_text: The SSSD join moves into a planned SSSD client role, together with the SSSD configuration.

@@ -554,6 +554,13 @@ family is cut by mechanism into `samba_join_member` (net_s3 → secrets.tdb) and
 `samba_join_sssd` (adcli → keytab) with **no** `samba_join_client`/`backend`
 switch (see "the cut" above).
 
+**Deprecated (2026-10-05):** `samba_join_sssd` is deprecated and will be removed
+in 3.0.0. The SSSD join moves into a planned SSSD client role that also sets up
+sssd.conf, nsswitch/PAM and the SSSD daemon, which this module deliberately
+leaves to the caller; the `join_sssd` scenario's client fixture is that role's
+prototype. Until the removal the module ships and is tested unchanged. With the
+removal, the adcli exception to the bindings rule leaves the modules.
+
 ---
 
 ## NT ACLs (samba_ntacl)

@@ -54,7 +54,7 @@ binary.
 | `samba_provision` | Provision a brand-new Samba AD domain controller | yes (binary) | yes |
 | `samba_join_dc` | Join an existing domain as an additional DC | yes (binary) | yes |
 | `samba_join_member` | Join an existing domain as a Samba member server (winbind) | yes (binary) | yes |
-| `samba_join_sssd` | Join an existing domain for SSSD (writes a Kerberos keytab) | yes (binary) | yes |
+| `samba_join_sssd` | Join an existing domain for SSSD (writes a Kerberos keytab); deprecated, removed in 3.0.0 (moves into a planned SSSD client role) | yes (binary) | yes |
 | `samba_schema_extension` | Extend the schema on the schema master (LAPS, OpenSSH public keys, LDAP compat) | yes | yes |
 | `samba_ntacl` | Set the NT ACLs and owners of a share root and managed folders on the file server, pass inheritance on | yes | yes |
 
@@ -64,7 +64,8 @@ writes**, not by the host's intended purpose:
 - `samba_join_dc` - `samba.join`, full DC replication.
 - `samba_join_member` - `samba.net_s3`, writes the machine secret to
   `secrets.tdb` (the winbind path).
-- `samba_join_sssd` - `adcli`, writes a Kerberos keytab (the SSSD path).
+- `samba_join_sssd` - `adcli`, writes a Kerberos keytab (the SSSD path);
+  deprecated, removed in 3.0.0 (moves into a planned SSSD client role).
 
 Each module performs **only the join act** and its idempotency detection. It
 does not template `smb.conf`/`sssd.conf`, configure idmap/nsswitch/PAM, or
