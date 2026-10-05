@@ -34,6 +34,8 @@
         display_name: Jane Doe
         email: jane.doe@example.com
         description: Integration test user
+        home_directory: "{{ samba_jane_home_directory }}"
+        home_drive: "H:"
         enabled: true
         password: "{{ _password }}"
         state: present

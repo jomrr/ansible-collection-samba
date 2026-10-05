@@ -106,6 +106,18 @@ users:
       returned: always
       type: str
       sample: Example user
+    home_directory:
+      description: The home folder (C(homeDirectory)), or null if unset.
+      returned: always
+      type: str
+      sample: \\fs1.example.com\homes\jdoe
+      version_added: 2.4.0
+    home_drive:
+      description: The drive letter of the home folder (C(homeDrive)), or null if unset.
+      returned: always
+      type: str
+      sample: "H:"
+      version_added: 2.4.0
     uid_number:
       description: The POSIX user ID (C(uidNumber)), or null if unset.
       returned: always

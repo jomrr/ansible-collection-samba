@@ -78,11 +78,13 @@ def test_query_escapes_filter_value(monkeypatch):
 
 def test_query_single_existing_user(monkeypatch):
     monkeypatch.setattr(samba_ldb, "load_ldb", FakeLdb)
-    samdb = FakeSamDB(result=[user_msg("jdoe", givenName="Jane", sn="Doe")])
+    samdb = FakeSamDB(result=[user_msg("jdoe", givenName="Jane", sn="Doe", homeDirectory="\\\\fs1\\homes\\jdoe", homeDrive="H:")])
     users = samba_user_info.query(samdb, "jdoe")
     assert len(users) == 1
     assert users[0]["username"] == "jdoe"
     assert users[0]["given_name"] == "Jane"
+    assert users[0]["home_directory"] == "\\\\fs1\\homes\\jdoe"
+    assert users[0]["home_drive"] == "H:"
     assert users[0]["state"] == "present"
 
 

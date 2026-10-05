@@ -178,11 +178,12 @@ def test_create_user_maps_attributes_onto_newuser():
     samdb = FakeSamDB()
     make_io(FakeLdb(), samdb).create_user(
         "jdoe", "pw", None,
-        {"given_name": "Jane", "surname": "Doe", "email": "jane@example.com", "uid_number": 10001, "gecos": "Jane"},
+        {"given_name": "Jane", "surname": "Doe", "email": "jane@example.com", "home_directory": "\\\\fs1\\homes\\jdoe",
+         "home_drive": "H:", "uid_number": 10001, "gecos": "Jane"},
     )
     assert samdb.newuser_kwargs == {
         "userou": None, "givenname": "Jane", "surname": "Doe", "mailaddress": "jane@example.com",
-        "uidnumber": 10001, "gecos": "Jane",
+        "homedirectory": "\\\\fs1\\homes\\jdoe", "homedrive": "H:", "uidnumber": 10001, "gecos": "Jane",
     }
 
 

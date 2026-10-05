@@ -28,6 +28,8 @@ ATTR_TO_LDAP = {
     "display_name": "displayName",
     "email": "mail",
     "description": "description",
+    "home_directory": "homeDirectory",
+    "home_drive": "homeDrive",
     "uid_number": "uidNumber",
     "gid_number": "gidNumber",
     "unix_home_directory": "unixHomeDirectory",
@@ -48,7 +50,7 @@ POSIX_INT_ATTRS = ("uid_number", "gid_number")
 #: ``display_name`` is not among them: newuser derives displayName from the
 #: names; an explicit value is a follow-up write.
 CREATE_ATTRS = (
-    "given_name", "surname", "email", "description",
+    "given_name", "surname", "email", "description", "home_directory", "home_drive",
     "uid_number", "gid_number", "unix_home_directory", "login_shell", "gecos",
 )
 
@@ -334,8 +336,8 @@ def run(params, check_mode, io):
     attr_changes = planned["attr_changes"]
     if created:
         # One add: newuser places the account under path and sets the names,
-        # mail, description and POSIX attributes itself; only what it cannot
-        # take (an explicit display name) is written afterwards.
+        # mail, description, home folder and POSIX attributes itself; only what
+        # it cannot take (an explicit display name) is written afterwards.
         create_attrs = {name: value for name, value in attr_changes.items() if name in CREATE_ATTRS}
         attr_changes = {name: value for name, value in attr_changes.items() if name not in CREATE_ATTRS}
         try:

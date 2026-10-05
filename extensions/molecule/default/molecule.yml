@@ -51,6 +51,7 @@ provisioner:
         samba_base_dn: "DC={{ samba_realm | lower | replace('.', ',DC=') }}"
         samba_dns_zone: "{{ samba_realm | lower }}"
         samba_fqdn: "{{ inventory_hostname }}.{{ samba_realm | lower }}"
+        samba_jane_home_directory: '\\fs1.samdom.example.com\homes\jane'
   playbooks:
     prepare: prepare.yml
     converge: converge.yml

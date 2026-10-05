@@ -63,6 +63,22 @@ options:
       - A free-form description of the user, mapped to the LDAP C(description)
         attribute.
     type: str
+  home_directory:
+    description:
+      - The home folder of the user, mapped to the LDAP C(homeDirectory)
+        attribute.
+      - A UNC path such as C(\\fs1.example.com\homes\jdoe) is connected as the
+        drive I(home_drive) at logon; a local path such as C(C:\Users\jdoe) is
+        used as it is.
+    type: str
+    version_added: 2.4.0
+  home_drive:
+    description:
+      - The drive letter the home folder is connected as at logon, for example
+        C(H:), mapped to the LDAP C(homeDrive) attribute.
+      - Only takes effect with a UNC path in I(home_directory).
+    type: str
+    version_added: 2.4.0
   uid_number:
     description:
       - The POSIX user ID, mapped to the RFC2307 C(uidNumber) attribute.
@@ -156,9 +172,9 @@ notes:
     a computer account matches nothing, so C(state=absent) never deletes a
     computer object.
   - Creating a user is all-or-nothing. The account is added in a single
-    operation, placed under I(path) with its names, e-mail, description and
-    POSIX attributes; only an explicit I(display_name) and C(enabled=false)
-    are follow-up writes. LDAP offers no transactions, so if such a follow-up
+    operation, placed under I(path) with its names, e-mail, description, home
+    folder and POSIX attributes; only an explicit I(display_name) and
+    C(enabled=false) are follow-up writes. LDAP offers no transactions, so if such a follow-up
     fails, the module removes the account it just created and fails with the
     cause; a failed create never leaves a half-configured account behind. A
     password rejected by the domain policy
@@ -195,6 +211,12 @@ EXAMPLES = r"""
   jomrr.samba.samba_user:
     username: jdoe
     enabled: true
+
+- name: Set the home folder, connected as drive H at logon
+  jomrr.samba.samba_user:
+    username: jdoe
+    home_directory: '\\fs1.example.com\homes\jdoe'
+    home_drive: "H:"
 
 - name: Set the RFC2307/POSIX attributes (domain provisioned with --use-rfc2307)
   jomrr.samba.samba_user:
@@ -264,6 +286,18 @@ user:
       returned: when the user exists
       type: str
       sample: Example user
+    home_directory:
+      description: The home folder (C(homeDirectory)), or null if unset.
+      returned: when the user exists
+      type: str
+      sample: \\fs1.example.com\homes\jdoe
+      version_added: 2.4.0
+    home_drive:
+      description: The drive letter of the home folder (C(homeDrive)), or null if unset.
+      returned: when the user exists
+      type: str
+      sample: "H:"
+      version_added: 2.4.0
     uid_number:
       description: The POSIX user ID (C(uidNumber)), or null if unset.
       returned: when the user exists
@@ -339,6 +373,8 @@ class SambaUserIO(samba_ldb.SambaObjectIO):
         "surname": "surname",
         "email": "mailaddress",
         "description": "description",
+        "home_directory": "homedirectory",
+        "home_drive": "homedrive",
         "uid_number": "uidnumber",
         "gid_number": "gidnumber",
         "unix_home_directory": "unixhome",
@@ -350,9 +386,9 @@ class SambaUserIO(samba_ldb.SambaObjectIO):
         """Create the user with one ``newuser`` call.
 
         The account is placed under ``path`` and gets the names, mail,
-        description and POSIX attributes on the add itself; samba sets the
-        password inside its own cleanup guard. Nothing is renamed or modified
-        afterwards for these. A concurrent creation (the object already exists
+        description, home folder and POSIX attributes on the add itself; samba
+        sets the password inside its own cleanup guard. Nothing is renamed or
+        modified afterwards for these. A concurrent creation (the object already exists
         at write time) is turned into a clear error instead of a raw traceback.
         """
         ldb = samba_ldb.load_ldb()
@@ -456,6 +492,8 @@ def main():
         "display_name": {"type": "str"},
         "email": {"type": "str"},
         "description": {"type": "str"},
+        "home_directory": {"type": "str"},
+        "home_drive": {"type": "str"},
         "uid_number": {"type": "int"},
         "gid_number": {"type": "int"},
         "unix_home_directory": {"type": "str"},

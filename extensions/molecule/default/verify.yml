@@ -24,6 +24,8 @@
           - _jane.users[0].surname == "Doe"
           - _jane.users[0].display_name == "Jane Doe"
           - _jane.users[0].email == "jane.doe@example.com"
+          - _jane.users[0].home_directory == samba_jane_home_directory
+          - _jane.users[0].home_drive == "H:"
           - _jane.users[0].enabled is true
 
     - name: Verify | Read the user created with names only

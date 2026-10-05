@@ -26,7 +26,7 @@ setup).
 
 | Module | Purpose | idempotent | check_mode |
 | ------ | ------- | ---------- | ---------- |
-| `samba_user` | Create, modify and remove users (incl. RFC2307/POSIX attributes) | yes | yes |
+| `samba_user` | Create, modify and remove users (incl. home folder and RFC2307/POSIX attributes) | yes | yes |
 | `samba_user_info` | Query users | n/a (read) | n/a |
 | `samba_group` | Create, modify and remove groups (scope, category, members, gid) | yes | yes |
 | `samba_group_info` | Query groups | n/a (read) | n/a |

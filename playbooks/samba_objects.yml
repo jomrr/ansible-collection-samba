@@ -58,6 +58,8 @@
 #       surname: Doe
 #       display_name: Jane Doe
 #       email: jane.doe@example.com
+#       home_directory: '\\fs1.example.com\homes\jdoe'
+#       home_drive: "H:"
 #       path: "OU=Eng,DC=example,DC=com"
 #       uid_number: 10001
 #       gid_number: 10000
@@ -114,6 +116,8 @@
         display_name: "{{ user.display_name | default(omit) }}"
         email: "{{ user.email | default(omit) }}"
         description: "{{ user.description | default(omit) }}"
+        home_directory: "{{ user.home_directory | default(omit) }}"
+        home_drive: "{{ user.home_drive | default(omit) }}"
         uid_number: "{{ user.uid_number | default(omit) }}"
         gid_number: "{{ user.gid_number | default(omit) }}"
         unix_home_directory: "{{ user.unix_home_directory | default(omit) }}"

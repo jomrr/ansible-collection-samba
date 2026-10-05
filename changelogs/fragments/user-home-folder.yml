@@ -1,0 +1,5 @@
+---
+minor_changes:
+  - samba_user - C(home_directory) and C(home_drive) manage a user's home folder
+    (C(homeDirectory)) and the drive it is connected as at logon (C(homeDrive)).
+  - samba_user_info - each user reports its C(home_directory) and C(home_drive).
