@@ -116,6 +116,10 @@ notes:
     local machine and has no remote/connection options.
   - It performs only the join; configuring smb.conf, the daemon and any host
     service stack is out of scope (a role or the caller does that).
+  - The new DC registers its DNS records on the existing DC over a sealed
+    DNS-RPC connection, where C(samba-tool domain join) only signs it. A signed
+    connection hangs once Kerberos negotiates an AES-SHA2 (RFC 8009) subkey, as
+    the crypto policies of Fedora and openSUSE do.
 seealso:
   - module: jomrr.samba.samba_provision
     description: Provision a brand-new domain instead of joining an existing one.
@@ -178,6 +182,7 @@ output:
     - "Replicating critical objects from the base DN of the domain"
 """
 
+import contextlib
 import importlib
 import logging
 
@@ -191,6 +196,41 @@ from ansible_collections.jomrr.samba.plugins.module_utils.samba_conn import (
     fail_without_bindings,
     run_or_fail,
 )
+
+
+class _SealedDnsserver:
+    """``samba.dcerpc.dnsserver`` for ``samba.join``, with sealed connections.
+
+    ``DCJoinContext.join_add_dns_records()`` registers the new DC over DNS-RPC
+    with the fixed binding ``ncacn_ip_tcp:<server>[sign]``. Integrity-only
+    DCE/RPC hangs once Kerberos negotiates an RFC 8009 (AES-SHA2) subkey, as the
+    crypto policies of Fedora and openSUSE do: samba sizes a signing-only
+    signature with a fixed value (``gssapi_get_sig_size()``, 28 bytes) that only
+    fits AES-SHA1, while the size for sealing comes from GSSAPI itself. Sealing
+    is also how the collection opens DNS-RPC elsewhere (samba_dns_conn).
+    Everything else is the real module.
+    """
+
+    def __init__(self, real):
+        self._real = real
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def dnsserver(self, binding, *args):
+        """Open the DNS-RPC connection with ``[seal]`` instead of ``[sign]``."""
+        return self._real.dnsserver(binding.replace("[sign]", "[seal]"), *args)
+
+
+@contextlib.contextmanager
+def _sealed_dns_rpc(join_mod):
+    """Seal the DNS-RPC connection ``samba.join`` opens while the block runs."""
+    signed = join_mod.dnsserver
+    join_mod.dnsserver = _SealedDnsserver(signed)
+    try:
+        yield
+    finally:
+        join_mod.dnsserver = signed
 
 
 class SambaJoinDcIO:
@@ -257,7 +297,7 @@ class SambaJoinDcIO:
         # would land on the process's stdout, which carries the JSON result.
         transcript = samba_local.Transcript()
         try:
-            with transcript:
+            with transcript, _sealed_dns_rpc(join_mod):
                 join_mod.join_DC(
                     logger=join_logger,
                     server=params["server"],

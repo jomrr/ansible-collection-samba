@@ -389,6 +389,29 @@ bindings exist for it; only the SSSD/adcli path is genuinely CLI-only:
     the caller omits it, and never passes `None` to `join_DC()`. Surfaced only by
     the live multi-host Molecule join; mocked units, which stub `join_DC`, could
     not see it.
+  - **Verified mechanism quirk (DNS-RPC signed, decided 2026-11-26).**
+    `DCJoinContext.join_add_dns_records()` registers the new DC on the existing
+    one with `dnsserver.dnsserver("ncacn_ip_tcp:<server>[sign]", ...)`, the only
+    signed DCE/RPC connection of a DC join (DRSUAPI and replication are sealed;
+    the signed LSA connections run only for a subdomain join). Verified in samba
+    4.24.7 and at tag `samba-4.25.1`. Integrity-only DCE/RPC hangs once Kerberos
+    negotiates an RFC 8009 (AES-SHA2) subkey, as the crypto policies of Fedora and
+    openSUSE do when the Kerberos profile includes `/etc/krb5.conf.d/` (the
+    samba_ad_dc role does since its commit 51ba6b7): `gssapi_get_sig_size()`
+    (`auth/kerberos/gssapi_helper.c`) sizes a signing-only signature with fixed
+    values (37 bytes for DES/RC4, 28 otherwise), which only fits AES-SHA1; for
+    sealing the size comes from `gss_wrap_iov_length()`. No smb.conf option
+    raises a `[sign]` binding to sealing; the auth level comes from the binding
+    string alone. Consequence: for the duration of `join_DC()` the module
+    replaces the module-global `dnsserver` name in `samba.join` with a proxy that
+    opens the same binding with `[seal]` and delegates everything else to the
+    real `samba.dcerpc.dnsserver`, then restores it. This applies the Connection
+    Model's sealing stance for DNS-RPC to the join, without a copy of samba's
+    join code (subclassing `DCJoinContext` would duplicate
+    `join_add_dns_records()`) and without weakening the distribution's Kerberos
+    policy. The `join_dc` Molecule joiner includes `/etc/krb5.conf.d/` like the
+    role, so a regression shows as a hanging join. The proxy can go once samba
+    sizes RFC 8009 signatures correctly or seals the connection itself.
 - **samba_join_member (winbind) - bindings.** The standard AD member join is
   `samba.net_s3.Net(creds, s3_lp, server).join_member(dnshostname, createupn,
   createcomputer, osName, osVer, osServicePack, machinepass)` - the source3

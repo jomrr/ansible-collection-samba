@@ -219,13 +219,26 @@
         unsafe_writes: true
       when: "'joiner' in group_names"
 
+    - name: Prepare | Joiner | Create the Kerberos profile directory
+      # The includedir below needs it; MIT Kerberos rejects a profile whose
+      # includedir does not exist (Debian/Ubuntu may not ship the directory).
+      ansible.builtin.file:
+        path: /etc/krb5.conf.d
+        state: directory
+        mode: "0755"
+      when: "'joiner' in group_names"
+
     - name: Prepare | Joiner | Pin Kerberos to the DC (no SRV dependency)
       # Explicit kdc/admin_server keeps the join robust if realm SRV/DNS is slow;
       # resolv.conf below additionally points at the DC's authoritative DNS.
+      # The includedir loads the distribution's Kerberos policy like the
+      # samba_ad_dc role does; on Fedora and openSUSE the crypto policy then
+      # negotiates AES-SHA2 subkeys, which a signed DNS-RPC join hangs on.
       ansible.builtin.copy:
         dest: /etc/krb5.conf
         mode: "0644"
         content: |
+          includedir /etc/krb5.conf.d/
           [libdefaults]
               default_realm = {{ samba_realm }}
               dns_lookup_realm = false

@@ -90,12 +90,28 @@ class FakeCredentialsMod:
         return self.last
 
 
+class FakeDnsserverMod:
+    DNS_CLIENT_VERSION_LONGHORN = 0x70000
+
+    def __init__(self):
+        self.bindings = []
+
+    def dnsserver(self, binding, lp, creds):
+        self.bindings.append(binding)
+
+
 class FakeJoinMod:
     def __init__(self):
         self.captured = None
+        self.dnsserver = FakeDnsserverMod()
+        self.client_version = None
 
     def join_DC(self, **kwargs):
         self.captured = kwargs
+        # join_add_dns_records() registers the new DC over DNS-RPC with a fixed
+        # [sign] binding and reads the module's constants.
+        self.dnsserver.dnsserver(f"ncacn_ip_tcp:{kwargs['server']}[sign]", kwargs["lp"], kwargs["creds"])
+        self.client_version = self.dnsserver.DNS_CLIENT_VERSION_LONGHORN
         # samba.join narrates the join on stdout.
         print("Adding CN=DC2,OU=Domain Controllers,DC=samdom,DC=example,DC=com")
 
@@ -136,6 +152,18 @@ def test_io_join_requires_kerberos_by_default(monkeypatch):
     # guess() would leave smb.conf's policy (usually "desired"); the module
     # pins Kerberos so the join fails rather than falling back to NTLM.
     assert fake_creds.last.calls["kerberos"] == FakeCredentialsMod.MUST_USE_KERBEROS
+
+
+def test_io_join_seals_the_dns_rpc_registration(monkeypatch):
+    # A signed DNS-RPC connection hangs with an AES-SHA2 Kerberos subkey; the
+    # module seals it for the join and restores samba.join afterwards.
+    fake_join = FakeJoinMod()
+    real_dnsserver = fake_join.dnsserver
+    _patch_join(monkeypatch, fake_join, FakeCredentialsMod())
+    samba_join_dc.SambaJoinDcIO(module=None).join(_join_params())
+    assert real_dnsserver.bindings == ["ncacn_ip_tcp:dc1.samdom.example.com[seal]"]
+    assert fake_join.client_version == FakeDnsserverMod.DNS_CLIENT_VERSION_LONGHORN
+    assert fake_join.dnsserver is real_dnsserver
 
 
 def test_io_join_desired_allows_the_ntlm_fallback(monkeypatch):
@@ -199,7 +227,7 @@ def test_io_join_derives_netbios_name_when_omitted(monkeypatch):
 
 
 def test_io_join_failure_is_clean_error_quoting_samba(monkeypatch, capsys):
-    class BoomJoin:
+    class BoomJoin(FakeJoinMod):
         def join_DC(self, **kwargs):
             print("DsAddEntry failed with status WERR_DS_DRA_ACCESS_DENIED")
             raise RuntimeError("failed to connect to the existing DC")
