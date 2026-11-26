@@ -4,6 +4,14 @@ jomrr.samba 2.4 Release Notes
 
 .. contents:: Topics
 
+v2.4.1
+======
+
+Bugfixes
+--------
+
+- samba_join_dc - the new DC registers its DNS records over a sealed instead of a signed DNS-RPC connection; with a Kerberos policy that negotiates AES-SHA2 (RFC 8009), as the crypto policies of Fedora and openSUSE do, the signed connection samba.join opens hung the join.
+
 v2.4.0
 ======
 

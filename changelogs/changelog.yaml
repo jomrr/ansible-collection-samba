@@ -375,3 +375,13 @@ releases:
       - join-sssd-deprecation.yml
       - user-home-folder.yml
     release_date: '2026-10-06'
+  2.4.1:
+    changes:
+      bugfixes:
+        - samba_join_dc - the new DC registers its DNS records over a sealed instead
+          of a signed DNS-RPC connection; with a Kerberos policy that negotiates AES-SHA2
+          (RFC 8009), as the crypto policies of Fedora and openSUSE do, the signed
+          connection samba.join opens hung the join.
+    fragments:
+      - join-dc-dns-rpc-seal.yml
+    release_date: '2026-11-26'
